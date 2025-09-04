@@ -1,0 +1,142 @@
+model Combo {
+  id        Int      @id @default(autoincrement())
+  nombre    String
+  descripcion String?
+  precio    Float
+  productos ComboProducto[]
+  activo    Boolean  @default(true)
+}
+
+model ComboProducto {
+  id         Int      @id @default(autoincrement())
+  combo      Combo    @relation(fields: [comboId], references: [id])
+  comboId    Int
+  producto   Producto @relation(fields: [productoId], references: [id])
+  productoId Int
+  cantidad   Int
+}
+model PushSubscription {
+  id        Int      @id @default(autoincrement())
+  endpoint  String   @unique
+  keys      Json
+  clienteId Int?
+  cliente   Cliente? @relation(fields: [clienteId], references: [id])
+  creadoEn  DateTime @default(now())
+}
+model Cliente {
+  id        Int      @id @default(autoincrement())
+  nombre    String
+  email     String?  @unique
+  telefono  String?
+  direccion String?
+  fechaNacimiento DateTime?
+  notas     String?
+  ventas    Venta[]
+  pushSubscriptions PushSubscription[]
+  creadoEn  DateTime @default(now())
+}
+model Sucursal {
+  id        Int      @id @default(autoincrement())
+  nombre    String
+  direccion String?
+  usuarios  Usuario[]
+  ventas    Venta[]
+}
+model ActiveSession {
+  id        Int      @id @default(autoincrement())
+  userId    Int     @unique
+  sessionToken String
+  usuario   Usuario @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  nombre    String
+  rol       String
+  sucursalId Int?
+  sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
+  ventas    Venta[]
+  activeSession ActiveSession?
+}
+
+model Insumo {
+  id        Int      @id @default(autoincrement())
+  nombre    String
+  stock     Float
+  unidad    String
+  proveedor String?
+  stockMinimo Float @default(4)
+  recetas   Receta[]
+}
+
+model Producto {
+  id        Int      @id @default(autoincrement())
+  nombre    String
+  tamanio   String
+  precio    Float @default(0)
+  recetas   Receta[]
+  ventas    VentaProducto[]
+  combos    ComboProducto[]
+}
+
+model Receta {
+  id         Int      @id @default(autoincrement())
+  producto   Producto @relation(fields: [productoId], references: [id])
+  productoId Int
+  insumo     Insumo   @relation(fields: [insumoId], references: [id])
+  insumoId   Int
+  cantidad   Float
+}
+
+model Venta {
+  id        Int      @id @default(autoincrement())
+  fecha     DateTime @default(now())
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
+  usuarioId Int
+  sucursalId Int?
+  sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
+  clienteId Int?
+  cliente   Cliente? @relation(fields: [clienteId], references: [id])
+  productos VentaProducto[]
+  pagos     VentaPago[]
+  total     Float
+  medioPago String
+  montoRecibido Float?
+  cambio    Float?
+}
+
+model VentaPago {
+  id        Int      @id @default(autoincrement())
+  venta     Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId   Int
+  tipo      String   // efectivo, tarjeta, transferencia, etc.
+  monto     Float
+}
+
+model VentaProducto {
+  id         Int      @id @default(autoincrement())
+  venta      Venta    @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+  ventaId    Int
+  producto   Producto @relation(fields: [productoId], references: [id])
+  productoId Int
+  cantidad   Int
+  subtotal   Float
+}
