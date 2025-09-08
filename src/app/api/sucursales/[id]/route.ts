@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import authOptions from "@/pages/api/auth/[...nextauth]";
+import type { Session } from "next-auth";
+import { hasPermission } from "@/lib/permissions";
 
 // GET /api/sucursales/[id]
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "sucursales.gestion")) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (isNaN(id))
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   const sucursal = await prisma.sucursal.findUnique({
@@ -27,9 +36,14 @@ export async function GET(
 // DELETE /api/sucursales/[id]
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "sucursales.gestion")) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (isNaN(id))
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   await prisma.sucursal.delete({ where: { id } });
@@ -39,9 +53,14 @@ export async function DELETE(
 // PUT /api/sucursales/[id]
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "sucursales.gestion")) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (isNaN(id))
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   const data = await req.json();

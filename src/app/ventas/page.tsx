@@ -1,140 +1,88 @@
 "use client";
+export const dynamic = "force-dynamic";
 import { withRole } from "../components/withRole";
-import React, { useEffect, useState } from "react";
-import { useSyncVentasOffline } from "../hooks/useSyncVentasOffline";
+import { withPermission } from "../components/withPermission";
+import React, { useEffect, useRef, useState } from "react";
 import SyncVentasBanner from "../components/SyncVentasBanner";
-import useSWR from "swr";
+import Link from "next/link";
+import useSWR, { mutate } from "swr";
+import { useAuthFetch } from "@/lib/useAuthFetch";
 import { useSession } from "next-auth/react";
 
-import { exportarVentasExcel } from "../reportes/ExportarExcel";
-import { exportarVentasPDF } from "../reportes/ExportarPDF";
 import { registrarVenta } from "../utils/registrarVenta";
 
-interface Venta {
-  id: number;
-  fecha: string;
-  usuarioId: number;
-  total: number;
-}
-interface Usuario {
-  id: number;
-  nombre: string;
-}
+// Eliminamos el listado de ventas de esta página: solo registrar ventas
+//
 
 function VentasPage() {
-  const { data: productos = [] } = useSWR("/api/productos", (url: string) =>
-    fetch(url).then((r) => r.json())
-  );
+  const { swrFetcher, authFetch } = useAuthFetch();
   const { data: session } = useSession();
-  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
-  const [ventas, setVentas] = useState<Venta[]>([]);
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
+  // Permisos y rol para controlar carga de productos (API protegida por catalogo.productos)
+  const userObj: Record<string, unknown> | undefined =
+    session?.user && typeof session.user === "object"
+      ? (session.user as unknown as Record<string, unknown>)
+      : undefined;
+  const permisos: Record<string, boolean> =
+    (userObj?.permisos as Record<string, boolean>) || {};
+  const rol =
+    typeof userObj?.rol === "string" ? (userObj.rol as string) : undefined;
+  const canVerProductos = permisos["catalogo.productos"] || rol === "admin";
+  const canVerClientes = permisos["clientes.gestion"] || rol === "admin";
+  const {
+    data: productosData,
+    error: productosError,
+    isLoading: productosLoading,
+  } = useSWR(
+    canVerProductos ? "/api/productos" : null,
+    (url: string) => swrFetcher(url),
+    {
+      revalidateOnFocus: false,
+      keepPreviousData: true,
+    }
+  );
+  type ProductoUI = {
+    id: number;
+    nombre: string;
+    tamanio?: string;
+    precio: number;
+  };
+  const productos: ProductoUI[] = Array.isArray(productosData)
+    ? (productosData as ProductoUI[])
+    : [];
+
+  // Usuarios no necesarios aquí
+  // Ya no cargamos el listado de ventas aquí para reducir la carga
   const [mensaje, setMensaje] = useState<string>("");
-  const [exportando, setExportando] = useState<"excel" | "pdf" | null>(null);
-  const [ventasLoading, setVentasLoading] = useState(false);
-  const rangoFechasValido = true; // Ajusta según tu lógica de validación
+  const { data: clientes = [] } = useSWR(
+    canVerClientes ? "/api/clientes" : null,
+    (u: string) => swrFetcher(u),
+    { revalidateOnFocus: false, keepPreviousData: true }
+  );
+  const [clienteIdSel, setClienteIdSel] = useState<number | "">("");
+  const [nuevoClienteVisible, setNuevoClienteVisible] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [nuevoTelefono, setNuevoTelefono] = useState("");
+  const [creandoCliente, setCreandoCliente] = useState(false);
+  const nombreNuevoClienteRef = useRef<HTMLInputElement | null>(null);
+  // Estado controlado para mostrar precio unitario y total
+  const [productoIdSel, setProductoIdSel] = useState<number | "">("");
+  const [cantSel, setCantSel] = useState<string>("1");
+
+  // Nota: no traemos usuarios aquí para no cargar de más
 
   useEffect(() => {
-    fetch("/api/usuarios")
-      .then((r) => r.json())
-      .then(setUsuarios);
-  }, []);
+    if (nuevoClienteVisible) {
+      // Enfocar el campo Nombre cuando se abre el formulario de nuevo cliente
+      requestAnimationFrame(() => nombreNuevoClienteRef.current?.focus());
+    }
+  }, [nuevoClienteVisible]);
 
   // ...carga de ventas, hooks offline, etc...
 
-  const handleExportarExcel = async () => {
-    setExportando("excel");
-    try {
-      const rows = ventas.map((v: Venta) => ({
-        id: v.id,
-        producto: "Venta",
-        cantidad: 1,
-        total: v.total,
-      }));
-      await exportarVentasExcel(rows, "ventas.xlsx");
-      setMensaje("Exportación a Excel exitosa");
-    } catch {
-      setMensaje("Error al exportar a Excel");
-    } finally {
-      setExportando(null);
-      setTimeout(() => setMensaje(""), 2500);
-    }
-  };
-  const handleExportarPDF = async () => {
-    setExportando("pdf");
-    try {
-      const rows = ventas.map((v: Venta) => ({
-        id: v.id,
-        fecha: v.fecha,
-        usuarioNombre: String(
-          usuarios.find((u) => u.id === v.usuarioId)?.nombre || v.usuarioId
-        ),
-        total: v.total,
-      }));
-      await exportarVentasPDF(rows, "ventas.pdf");
-      setMensaje("Exportación a PDF exitosa");
-    } catch {
-      setMensaje("Error al exportar a PDF");
-    } finally {
-      setExportando(null);
-      setTimeout(() => setMensaje(""), 2500);
-    }
-  };
-
   return (
-    <div className="max-w-4xl mx-auto p-4 relative">
+    <div className="max-w-5xl mx-auto p-4 relative space-y-4">
       <SyncVentasBanner />
       <div className="flex flex-col md:flex-row md:items-end gap-2 mb-4">
-        <div className="flex flex-col gap-1 md:flex-row md:items-end md:gap-2">
-          <label className="text-sm">Desde</label>
-          <input
-            type="date"
-            value={desde}
-            onChange={(e) => setDesde(e.target.value)}
-            className="border p-2 rounded"
-            aria-label="Filtrar desde fecha"
-          />
-        </div>
-        <div className="flex flex-col gap-1 md:flex-row md:items-end md:gap-2">
-          <label className="text-sm">Hasta</label>
-          <input
-            type="date"
-            value={hasta}
-            onChange={(e) => setHasta(e.target.value)}
-            className="border p-2 rounded"
-            aria-label="Filtrar hasta fecha"
-          />
-        </div>
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={handleExportarExcel}
-          disabled={
-            ventas.length === 0 || exportando === "excel" || !rangoFechasValido
-          }
-          aria-busy={exportando === "excel"}
-        >
-          {exportando === "excel" && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar Excel
-        </button>
-        <button
-          className="bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={handleExportarPDF}
-          disabled={
-            ventas.length === 0 || exportando === "pdf" || !rangoFechasValido
-          }
-          aria-busy={exportando === "pdf"}
-        >
-          {exportando === "pdf" && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar PDF
-        </button>
-        {!rangoFechasValido && (
-          <span className="text-red-500 text-xs">Rango de fechas inválido</span>
-        )}
         <button
           className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2"
           onClick={() => window.location.reload()}
@@ -144,6 +92,21 @@ function VentasPage() {
           </span>
           Recargar
         </button>
+        <div className="flex gap-2">
+          <Link
+            href="/ventas/pendientes"
+            className="bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700 text-center"
+          >
+            Ver pendientes
+          </Link>
+          <Link
+            href="/ventas/listado"
+            className="border px-4 py-2 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 text-center"
+            prefetch={false}
+          >
+            Ver listado
+          </Link>
+        </div>
       </div>
       {mensaje && (
         <div className="mb-2 text-center font-semibold text-green-700 bg-green-100 border border-green-300 rounded p-2 animate-fade-in">
@@ -158,15 +121,19 @@ function VentasPage() {
           e.preventDefault();
           setMensaje("");
           const form = e.target as HTMLFormElement;
-          const productoId = Number(
-            (form.productoId as HTMLSelectElement).value
-          );
-          const cantidad = Number((form.cantidad as HTMLInputElement).value);
+          const productoId =
+            typeof productoIdSel === "number" ? productoIdSel : NaN;
+          const cantidad = parseInt(cantSel || "0", 10);
           const usuarioId = session?.user?.id;
-          const medioPago = (form.medioPago as HTMLSelectElement).value;
-          const producto = productos.find((p: any) => p.id === productoId);
+          const producto = productos.find(
+            (p: { id: number }) => p.id === productoId
+          );
           if (!productoId || !cantidad || !usuarioId || !producto) {
             setMensaje("Completa todos los campos");
+            return;
+          }
+          if (typeof clienteIdSel !== "number") {
+            setMensaje("Selecciona un cliente");
             return;
           }
           const total = producto.precio * cantidad;
@@ -175,8 +142,9 @@ function VentasPage() {
               usuarioId,
               productos: [{ productoId, cantidad }],
               total,
-              pagos: [{ tipo: medioPago, monto: total }],
+              pagos: [{ tipo: "efectivo", monto: 0 }],
               cambio: 0,
+              clienteId: clienteIdSel,
             });
             setMensaje(
               navigator.onLine
@@ -184,50 +152,191 @@ function VentasPage() {
                 : "Venta guardada offline, se sincronizará"
             );
             form.reset();
-          } catch (err: any) {
-            setMensaje(err?.message || "Error al registrar venta");
+            setProductoIdSel("");
+            setCantSel("1");
+            setClienteIdSel("");
+          } catch (err) {
+            if (err instanceof Error) setMensaje(err.message);
+            else setMensaje("Error al registrar venta");
           }
         }}
         aria-label="Registrar venta rápida"
       >
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-start">
           <select
             name="productoId"
-            className="border p-2 rounded w-48"
+            className="border p-2 rounded w-full sm:w-48"
             required
-            defaultValue=""
+            value={productoIdSel}
+            onChange={(e) => {
+              const v = e.target.value;
+              setProductoIdSel(v ? Number(v) : "");
+            }}
           >
             <option value="" disabled>
               Selecciona producto
             </option>
-            {productos?.map((p: any) => (
-              <option key={p.id} value={p.id}>
-                {p.nombre} {p.tamanio ? `(${p.tamanio})` : ""} - $
-                {p.precio?.toFixed(2)}
-              </option>
-            ))}
+            {productos.map(
+              (p: {
+                id: number;
+                nombre: string;
+                tamanio?: string;
+                precio: number;
+              }) => (
+                <option key={p.id} value={p.id}>
+                  {p.nombre} {p.tamanio ? `(${p.tamanio})` : ""} - $
+                  {p.precio?.toFixed(2)}
+                </option>
+              )
+            )}
           </select>
+          {!canVerProductos && !productosLoading && (
+            <div className="text-xs text-amber-700 bg-amber-100 border border-amber-300 rounded p-2 w-full sm:w-auto">
+              No tienes permiso para ver productos (catalogo.productos). Pide a
+              un administrador que te lo habilite.
+            </div>
+          )}
+          {productosError && (
+            <div className="text-xs text-red-700 bg-red-100 border border-red-300 rounded p-2 w-full sm:w-auto">
+              Error cargando productos
+            </div>
+          )}
+          <select
+            name="clienteId"
+            className="border p-2 rounded w-full sm:w-56"
+            required
+            value={clienteIdSel}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === "__nuevo__") {
+                setClienteIdSel("");
+                setNuevoClienteVisible(true);
+                return;
+              }
+              const id = val ? Number(val) : "";
+              setClienteIdSel(id);
+              if (val) setNuevoClienteVisible(false);
+            }}
+          >
+            <option value="" disabled>
+              Selecciona cliente
+            </option>
+            <option value="__nuevo__">+ Nuevo cliente…</option>
+            {Array.isArray(clientes) &&
+              clientes.map((c: { id: number; nombre: string }) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
+                </option>
+              ))}
+          </select>
+          {nuevoClienteVisible && (
+            <div className="flex flex-col sm:flex-row flex-wrap items-start sm:items-center gap-2 w-full">
+              <input
+                ref={nombreNuevoClienteRef}
+                type="text"
+                placeholder="Nombre"
+                className="border p-2 rounded w-full sm:w-40"
+                value={nuevoNombre}
+                onChange={(e) => setNuevoNombre(e.target.value)}
+              />
+              <input
+                type="tel"
+                placeholder="Teléfono"
+                className="border p-2 rounded w-full sm:w-36"
+                value={nuevoTelefono}
+                onChange={(e) => setNuevoTelefono(e.target.value)}
+              />
+              <button
+                type="button"
+                disabled={creandoCliente || nuevoNombre.trim().length < 2}
+                className="bg-green-600 text-white px-3 py-2 rounded disabled:opacity-50 w-full sm:w-auto"
+                onClick={async () => {
+                  setMensaje("");
+                  try {
+                    setCreandoCliente(true);
+                    const res = await authFetch("/api/clientes", {
+                      method: "POST",
+                      body: {
+                        nombre: nuevoNombre.trim(),
+                        telefono: nuevoTelefono.trim() || undefined,
+                      },
+                    });
+                    if (!res.ok) {
+                      const j = await res.json().catch(() => ({}));
+                      throw new Error(j.error || "No se pudo crear el cliente");
+                    }
+                    const nuevo = await res.json();
+                    setClienteIdSel(nuevo.id);
+                    setNuevoClienteVisible(false);
+                    setNuevoNombre("");
+                    setNuevoTelefono("");
+                    mutate("/api/clientes");
+                    setMensaje("Cliente creado");
+                  } catch (err) {
+                    setMensaje(
+                      err instanceof Error
+                        ? err.message
+                        : "Error creando cliente"
+                    );
+                  } finally {
+                    setCreandoCliente(false);
+                  }
+                }}
+              >
+                {creandoCliente ? "Creando..." : "Crear"}
+              </button>
+            </div>
+          )}
           <input
             name="cantidad"
             type="number"
             min={1}
             placeholder="Cantidad"
-            className="border p-2 rounded w-24"
+            className="border p-2 rounded w-full sm:w-24"
             required
+            value={cantSel}
+            onChange={(e) => {
+              let v = e.target.value.replace(/\D/g, "");
+              v = v.replace(/^0+(?=\d)/, "");
+              setCantSel(v);
+            }}
+            onBlur={() => {
+              const n = parseInt(cantSel || "0", 10);
+              if (!Number.isFinite(n) || n < 1) setCantSel("1");
+            }}
           />
-          <select
-            name="medioPago"
-            className="border p-2 rounded w-32"
-            required
-            defaultValue="efectivo"
-          >
-            <option value="efectivo">Efectivo</option>
-            <option value="tarjeta">Tarjeta</option>
-            <option value="transferencia">Transferencia</option>
-          </select>
+          {/* Información de precio unitario y total estimado */}
+          <div className="hidden md:flex items-center gap-3 text-sm px-2">
+            <span className="text-gray-600">
+              Unitario: $
+              {(() => {
+                const p = productos.find((x: { id: number; precio: number }) =>
+                  typeof productoIdSel === "number"
+                    ? x.id === productoIdSel
+                    : false
+                );
+                return (p?.precio ?? 0).toFixed(2);
+              })()}
+            </span>
+            <span className="font-semibold">
+              Total: $
+              {(() => {
+                const p = productos.find((x: { id: number; precio: number }) =>
+                  typeof productoIdSel === "number"
+                    ? x.id === productoIdSel
+                    : false
+                );
+                const unit = p?.precio ?? 0;
+                const qty = parseInt(cantSel || "0", 10);
+                return (unit * (Number.isFinite(qty) ? qty : 0)).toFixed(2);
+              })()}
+            </span>
+          </div>
+          {/* La venta siempre se registrará como pendiente (pago 0) */}
+
           <button
             type="submit"
-            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full sm:w-auto"
           >
             Registrar
           </button>
@@ -238,45 +347,13 @@ function VentasPage() {
           </div>
         )}
       </form>
-      <div className="overflow-x-auto">
-        {ventasLoading ? (
-          <div className="text-center py-8">Cargando ventas...</div>
-        ) : ventas.length === 0 ? (
-          <div className="text-center text-gray-500 py-8">
-            No hay ventas registradas para los filtros seleccionados.
-          </div>
-        ) : (
-          <table className="min-w-full border" aria-label="Tabla de ventas">
-            <thead>
-              <tr className="bg-gray-100 dark:bg-zinc-800">
-                <th className="p-2 border">ID</th>
-                <th className="p-2 border">Fecha</th>
-                <th className="p-2 border">Usuario</th>
-                <th className="p-2 border">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ventas.map((venta: Venta) => (
-                <tr
-                  key={venta.id}
-                  tabIndex={0}
-                  className="hover:bg-blue-50 focus:bg-blue-100 transition-colors"
-                >
-                  <td className="p-2 border text-center">{venta.id}</td>
-                  <td className="p-2 border">{venta.fecha?.slice(0, 10)}</td>
-                  <td className="p-2 border">
-                    {usuarios.find((u) => u.id === venta.usuarioId)?.nombre ||
-                      venta.usuarioId}
-                  </td>
-                  <td className="p-2 border">${venta.total?.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {/* El listado se movió a /ventas/listado */}
     </div>
   );
 }
 
-export default withRole(VentasPage, ["admin", "vendedor"]);
+// Soporte de permisos granulares: si existen, se aplican; si no, cae al rol
+export default withPermission(
+  withRole(VentasPage, ["admin", "vendedor", "cajero"]),
+  ["ventas.registrar"]
+);

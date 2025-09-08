@@ -1,3 +1,4 @@
+
 -- CreateTable
 CREATE TABLE "Usuario" (
     "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

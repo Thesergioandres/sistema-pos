@@ -22,6 +22,8 @@ import {
   ArcElement,
   Legend as ChartLegend,
 } from "chart.js";
+import { useAuthFetch } from "@/lib/useAuthFetch";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -52,15 +54,21 @@ export default function ReporteGeneral({
   tipo: string;
   sucursalId?: number;
 }) {
+  const { authFetch } = useAuthFetch();
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
+  const [preset, setPreset] = useState<"hoy" | "semana" | "mes" | "custom">(
+    tipo === "personalizado" ? "hoy" : "custom"
+  );
+  const desdeDeb = useDebouncedValue(desde, 400);
+  const hastaDeb = useDebouncedValue(hasta, 400);
   const { data: session } = useSession();
   const sucursalId =
     typeof propSucursalId !== "undefined"
       ? propSucursalId
       : session?.user?.sucursalId;
   const { data: ventas = [], isLoading: ventasLoading } = useSWR<Venta[]>(
-    ["/api/ventas", tipo, desde, hasta, sucursalId],
+    ["/api/ventas", tipo, desdeDeb, hastaDeb, sucursalId],
     async () => {
       let url = "/api/ventas";
       const params = new URLSearchParams();
@@ -83,18 +91,51 @@ export default function ReporteGeneral({
         params.set("desde", primerDia.toISOString().slice(0, 10));
         params.set("hasta", ultimoDia.toISOString().slice(0, 10));
       } else if (tipo === "personalizado") {
-        if (desde && hasta) {
+        if (preset !== "custom") {
+          const hoy = new Date();
+          if (preset === "hoy") {
+            const d = hoy.toISOString().slice(0, 10);
+            params.set("desde", d);
+            params.set("hasta", d);
+          } else if (preset === "semana") {
+            const primerDia = new Date(hoy);
+            primerDia.setDate(hoy.getDate() - hoy.getDay());
+            const ultimoDia = new Date(primerDia);
+            ultimoDia.setDate(primerDia.getDate() + 6);
+            params.set("desde", primerDia.toISOString().slice(0, 10));
+            params.set("hasta", ultimoDia.toISOString().slice(0, 10));
+          } else if (preset === "mes") {
+            const primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+            const ultimoDia = new Date(
+              hoy.getFullYear(),
+              hoy.getMonth() + 1,
+              0
+            );
+            params.set("desde", primerDia.toISOString().slice(0, 10));
+            params.set("hasta", ultimoDia.toISOString().slice(0, 10));
+          }
+        } else if (desde && hasta) {
           params.set("desde", desde);
           params.set("hasta", hasta);
         }
       }
-      if (sucursalId) params.set("sucursalId", String(sucursalId));
+      if (sucursalId) {
+        params.set("sucursalId", String(sucursalId));
+      } else {
+        // Usar negocioId del selector persistido para consolidar sucursales
+        const negocioId =
+          typeof window !== "undefined"
+            ? localStorage.getItem("negocioId")
+            : null;
+        if (negocioId) params.set("negocioId", negocioId);
+      }
       if (Array.from(params).length > 0) {
         url += `?${params.toString()}`;
       }
-      const res = await fetch(url);
+      const res = await authFetch(url);
       return res.json();
-    }
+    },
+    { revalidateOnFocus: false, keepPreviousData: true }
   );
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [usuarioId, setUsuarioId] = useState<string>("");
@@ -103,10 +144,15 @@ export default function ReporteGeneral({
   const [exportMsg, setExportMsg] = useState<string>("");
 
   useEffect(() => {
-    fetch("/api/usuarios")
+    const abort = new AbortController();
+    authFetch("/api/usuarios", { headers: {}, method: "GET" })
       .then((res) => res.json())
-      .then(setUsuarios);
-  }, []);
+      .then(setUsuarios)
+      .catch(() => void 0);
+    return () => {
+      abort.abort();
+    };
+  }, [authFetch]);
 
   useEffect(() => {
     setFiltroError("");
@@ -178,23 +224,66 @@ export default function ReporteGeneral({
 
   // Chart.js ya tiene los datos preparados arriba (barData, pieData)
 
+  const todayStr = new Date().toISOString().slice(0, 10);
   return (
     <div className="p-8 max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Reporte {tipo}</h1>
       {tipo === "personalizado" && (
         <div className="flex flex-col gap-2 mb-4">
+          <div className="flex gap-2 flex-wrap">
+            <button
+              className={`px-3 py-2 rounded border ${
+                preset === "hoy" ? "bg-blue-600 text-white" : ""
+              }`}
+              onClick={() => setPreset("hoy")}
+              type="button"
+            >
+              Hoy
+            </button>
+            <button
+              className={`px-3 py-2 rounded border ${
+                preset === "semana" ? "bg-blue-600 text-white" : ""
+              }`}
+              onClick={() => setPreset("semana")}
+              type="button"
+            >
+              Semana
+            </button>
+            <button
+              className={`px-3 py-2 rounded border ${
+                preset === "mes" ? "bg-blue-600 text-white" : ""
+              }`}
+              onClick={() => setPreset("mes")}
+              type="button"
+            >
+              Mes
+            </button>
+            <button
+              className={`px-3 py-2 rounded border ${
+                preset === "custom" ? "bg-blue-600 text-white" : ""
+              }`}
+              onClick={() => setPreset("custom")}
+              type="button"
+            >
+              Personalizado
+            </button>
+          </div>
           <div className="flex gap-2">
             <input
               type="date"
               value={desde}
               onChange={(e) => setDesde(e.target.value)}
               className="border p-2 rounded"
+              disabled={preset !== "custom"}
+              max={todayStr}
             />
             <input
               type="date"
               value={hasta}
               onChange={(e) => setHasta(e.target.value)}
               className="border p-2 rounded"
+              disabled={preset !== "custom"}
+              max={todayStr}
             />
           </div>
           {filtroError && (
@@ -271,16 +360,18 @@ export default function ReporteGeneral({
               }}
             />
           </div>
-          <div>
-            <h2 className="font-bold mb-2">Ventas por usuario (Chart.js)</h2>
-            <Pie
-              data={pieData}
-              options={{
-                responsive: true,
-                plugins: { legend: { position: "bottom" } },
-              }}
-            />
-          </div>
+          {Object.keys(ventasPorUsuario).length <= 12 && (
+            <div>
+              <h2 className="font-bold mb-2">Ventas por usuario (Chart.js)</h2>
+              <Pie
+                data={pieData}
+                options={{
+                  responsive: true,
+                  plugins: { legend: { position: "bottom" } },
+                }}
+              />
+            </div>
+          )}
         </Suspense>
       </div>
       <div className="flex gap-2 mb-4">

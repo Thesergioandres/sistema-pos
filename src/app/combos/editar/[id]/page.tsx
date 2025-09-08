@@ -3,6 +3,9 @@ import React, { useEffect, useState } from "react";
 import useSWR from "swr";
 import { useSession } from "next-auth/react";
 import { useParams, useRouter } from "next/navigation";
+import { useAuthFetch } from "@/lib/useAuthFetch";
+import { useToast } from "@/components/toast/ToastProvider";
+import { withPermission } from "@/app/components/withPermission";
 
 interface Producto {
   id: number;
@@ -24,24 +27,26 @@ interface ComboForm {
   activo?: boolean;
 }
 
-export default function EditarComboPage() {
+function EditarComboPage() {
   const params = useParams();
   const router = useRouter();
   const comboId = Number(params?.id);
   // Obtener sucursal activa de la sesión
   const { data: session } = useSession();
+  const { swrFetcher, authFetch } = useAuthFetch();
+  const { show } = useToast();
   const sucursalId = session?.user?.sucursalId;
   const productosUrl = sucursalId
     ? `/api/productos?sucursalId=${sucursalId}`
     : "/api/productos";
   const { data: productos = [] } = useSWR<Producto[]>(
     productosUrl,
-    (url: string) => fetch(url).then((r) => r.json())
+    (url: string) => swrFetcher(url)
   );
   const { data: combo, isLoading } = useSWR<
     ComboForm & { productos: { productoId: number; cantidad: number }[] }
   >(comboId ? `/api/combos/${comboId}` : null, (url: string) =>
-    fetch(url).then((r) => r.json())
+    swrFetcher(url)
   );
   const [form, setForm] = useState<ComboForm>({
     nombre: "",
@@ -117,10 +122,9 @@ export default function EditarComboPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch(`/api/combos/${comboId}`, {
+      const res = await authFetch(`/api/combos/${comboId}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           ...form,
           precio: Number(form.precio),
           productos: form.productos.map((p) => ({
@@ -128,14 +132,16 @@ export default function EditarComboPage() {
             productoId: Number(p.productoId),
             cantidad: Number(p.cantidad),
           })),
-        }),
+        },
       });
       if (!res.ok) throw new Error("Error al actualizar combo");
       setSuccess("Combo actualizado correctamente");
+      show("Combo actualizado", "success");
       setTimeout(() => router.push("/combos"), 1000);
     } catch (err) {
       if (err instanceof Error) setError(err.message);
       else setError("Error desconocido");
+      show("Error al actualizar combo", "error");
     } finally {
       setLoading(false);
     }
@@ -144,15 +150,18 @@ export default function EditarComboPage() {
   if (isLoading) return <div>Cargando combo...</div>;
 
   return (
-    <div className="max-w-xl mx-auto p-4">
-      <h2 className="text-xl font-bold mb-4">Editar Combo / Promoción</h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <div className="max-w-2xl mx-auto px-4 py-6">
+      <h2 className="text-xl font-bold mb-4">Editar combo / promoción</h2>
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm"
+      >
         <input
           name="nombre"
           value={form.nombre}
           onChange={handleChange}
           placeholder="Nombre"
-          className="w-full border p-2 rounded"
+          className="w-full border p-2 rounded bg-transparent"
           required
         />
         <textarea
@@ -160,7 +169,7 @@ export default function EditarComboPage() {
           value={form.descripcion || ""}
           onChange={handleChange}
           placeholder="Descripción"
-          className="w-full border p-2 rounded"
+          className="w-full border p-2 rounded bg-transparent"
         />
         <input
           name="precio"
@@ -168,7 +177,7 @@ export default function EditarComboPage() {
           value={form.precio}
           onChange={handleChange}
           placeholder="Precio"
-          className="w-full border p-2 rounded"
+          className="w-full border p-2 rounded bg-transparent"
           required
           min={0}
           step={0.01}
@@ -179,19 +188,22 @@ export default function EditarComboPage() {
             <button
               type="button"
               onClick={agregarProducto}
-              className="bg-blue-500 text-white px-2 py-1 rounded"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
             >
               Agregar
             </button>
           </div>
           {form.productos.map((cp, i) => (
-            <div key={i} className="flex gap-2 mb-2 items-center">
+            <div
+              key={i}
+              className="flex flex-col sm:flex-row gap-2 mb-2 items-center"
+            >
               <select
                 value={cp.productoId}
                 onChange={(e) =>
                   handleProductoChange(i, "productoId", e.target.value)
                 }
-                className="border p-1 rounded"
+                className="border p-1 rounded bg-transparent"
               >
                 {productos.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -206,12 +218,12 @@ export default function EditarComboPage() {
                 onChange={(e) =>
                   handleProductoChange(i, "cantidad", e.target.value)
                 }
-                className="border p-1 rounded w-20"
+                className="border p-1 rounded w-24 bg-transparent"
               />
               <button
                 type="button"
                 onClick={() => quitarProducto(i)}
-                className="text-red-500"
+                className="text-red-600 hover:underline"
               >
                 Quitar
               </button>
@@ -228,7 +240,7 @@ export default function EditarComboPage() {
         </div>
         <button
           type="submit"
-          className="bg-green-600 text-white px-4 py-2 rounded"
+          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
           disabled={loading}
         >
           {loading ? "Guardando..." : "Guardar Cambios"}
@@ -239,3 +251,5 @@ export default function EditarComboPage() {
     </div>
   );
 }
+
+export default withPermission(EditarComboPage, ["catalogo.combos"]);

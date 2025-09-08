@@ -24,5 +24,46 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Evitar desbordes de medios y tablas */
+img,
+svg,
+canvas,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Tablas seguras por defecto */
+.table-wrapper {
+  overflow-x: auto;
+  width: 100%;
+}
+.table-base {
+  min-width: 100%;
+  font-size: 0.9rem;
+}
+.table-base thead th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.table-base td,
+.table-base th {
+  white-space: nowrap;
+  padding: 0.5rem 0.75rem;
+}
+.table-base tbody tr {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Cortar palabras largas que rompan el layout */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+html {
+  scroll-behavior: smooth;
 }

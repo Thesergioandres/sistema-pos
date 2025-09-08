@@ -41,6 +41,13 @@ model Sucursal {
   direccion String?
   usuarios  Usuario[]
   ventas    Venta[]
+  // Multi-negocio
+  negocio   Negocio? @relation(fields: [negocioId], references: [id])
+  negocioId Int?
+  isPrincipal Boolean @default(false)
+  // Inventario y catálogo por sucursal
+  insumos    Insumo[]
+  productos  Producto[]
 }
 model ActiveSession {
   id        Int      @id @default(autoincrement())
@@ -65,16 +72,42 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Nuevo concepto central: Negocio (multi-tenant)
+model Negocio {
+  id          Int         @id @default(autoincrement())
+  nombre      String
+  descripcion String?
+  creadoEn    DateTime    @default(now())
+  propietarios NegocioPropietario[]
+  sucursales   Sucursal[]
+}
+
+// Propietarios de cada negocio (uno o varios)
+model NegocioPropietario {
+  id         Int      @id @default(autoincrement())
+  negocio    Negocio  @relation(fields: [negocioId], references: [id], onDelete: Cascade)
+  negocioId  Int
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuarioId  Int
+  creadoEn   DateTime @default(now())
+
+  @@unique([negocioId, usuarioId])
+}
+
 model Usuario {
   id        Int      @id @default(autoincrement())
   email     String   @unique
   password  String
   nombre    String
   rol       String
+  // Permisos granulares por áreas de la app (clave/valor)
+  permisos  Json?
   sucursalId Int?
   sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
   ventas    Venta[]
   activeSession ActiveSession?
+  // Negocios donde es propietario
+  negociosPropietario NegocioPropietario[]
 }
 
 model Insumo {
@@ -85,6 +118,9 @@ model Insumo {
   proveedor String?
   stockMinimo Float @default(4)
   recetas   Receta[]
+  // Pertenencia a una sucursal (inventario por sucursal)
+  sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
+  sucursalId Int?
 }
 
 model Producto {
@@ -95,6 +131,9 @@ model Producto {
   recetas   Receta[]
   ventas    VentaProducto[]
   combos    ComboProducto[]
+  // Pertenencia a una sucursal (catálogo por sucursal)
+  sucursal   Sucursal? @relation(fields: [sucursalId], references: [id])
+  sucursalId Int?
 }
 
 model Receta {
@@ -121,6 +160,7 @@ model Venta {
   medioPago String
   montoRecibido Float?
   cambio    Float?
+  estado    String   @default("pendiente") // pendiente | pagada
 }
 
 model VentaPago {
@@ -129,6 +169,9 @@ model VentaPago {
   ventaId   Int
   tipo      String   // efectivo, tarjeta, transferencia, etc.
   monto     Float
+  // Permite asociar un pago a un producto específico para soportar abonos parciales
+  ventaProducto   VentaProducto? @relation("PagoPorProducto", fields: [ventaProductoId], references: [id])
+  ventaProductoId Int?
 }
 
 model VentaProducto {
@@ -139,4 +182,5 @@ model VentaProducto {
   productoId Int
   cantidad   Int
   subtotal   Float
+  pagos      VentaPago[] @relation("PagoPorProducto")
 }

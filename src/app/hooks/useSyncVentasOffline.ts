@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useAuthFetch } from "@/lib/useAuthFetch";
 import {
   guardarVentaOffline,
   obtenerVentasPendientes,
@@ -7,6 +8,7 @@ import {
 import type { VentaPayload } from "./types";
 
 export function useSyncVentasOffline() {
+  const { authFetch } = useAuthFetch();
   const [pendientes, setPendientes] = useState<VentaPayload[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
@@ -25,10 +27,9 @@ export function useSyncVentasOffline() {
         setError("");
         try {
           for (const venta of pendientes) {
-            const res = await fetch("/api/ventas", {
+            const res = await authFetch("/api/ventas", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(venta),
+              body: venta,
             });
             if (!res.ok) throw new Error("Error al sincronizar venta");
           }
@@ -46,26 +47,27 @@ export function useSyncVentasOffline() {
     window.addEventListener("online", sync);
     sync();
     return () => window.removeEventListener("online", sync);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendientes, syncing]);
+  }, [pendientes, syncing, authFetch]);
 
   // Guardar venta offline si está offline
-  const registrarVenta = useCallback(async (venta: VentaPayload) => {
-    if (!navigator.onLine) {
-      await guardarVentaOffline(venta);
-      setPendientes(await obtenerVentasPendientes());
-      return { offline: true };
-    }
-    // Si está online, intentar normalmente
-    const res = await fetch("/api/ventas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(venta),
-    });
-    if (!res.ok) throw new Error("Error al registrar venta");
-    setLastSync(new Date());
-    return { offline: false };
-  }, []);
+  const registrarVenta = useCallback(
+    async (venta: VentaPayload) => {
+      if (!navigator.onLine) {
+        await guardarVentaOffline(venta);
+        setPendientes(await obtenerVentasPendientes());
+        return { offline: true };
+      }
+      // Si está online, intentar normalmente
+      const res = await authFetch("/api/ventas", {
+        method: "POST",
+        body: venta,
+      });
+      if (!res.ok) throw new Error("Error al registrar venta");
+      setLastSync(new Date());
+      return { offline: false };
+    },
+    [authFetch]
+  );
 
   return {
     pendientes,

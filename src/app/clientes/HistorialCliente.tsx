@@ -1,5 +1,6 @@
 "use client";
 import useSWR from "swr";
+import { useAuthFetch } from "@/lib/useAuthFetch";
 
 interface Venta {
   id: number;
@@ -11,9 +12,10 @@ interface Venta {
 }
 
 export default function HistorialCliente({ clienteId }: { clienteId: number }) {
+  const { swrFetcher } = useAuthFetch();
   const { data: ventas = [], isLoading } = useSWR<Venta[]>(
     `/api/clientes/historial/${clienteId}`,
-    (url: string) => fetch(url).then((r) => r.json())
+    (url: string) => swrFetcher(url)
   );
   if (isLoading)
     return <div className="text-center">Cargando historial...</div>;

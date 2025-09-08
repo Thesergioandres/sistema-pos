@@ -1,4 +1,5 @@
 "use client";
+import React from "react";
 import { Bar, Pie } from "react-chartjs-2";
 
 interface BarData {
@@ -21,7 +22,6 @@ export default function ReportCharts({
   pieData,
   pieColors,
 }: ReportChartsProps) {
-  // Preparar datos para Chart.js
   const chartBarData = {
     labels: barData.map((d) => d.fecha),
     datasets: [
@@ -32,6 +32,7 @@ export default function ReportCharts({
       },
     ],
   };
+
   const chartPieData = {
     labels: pieData.map((d) => d.usuario),
     datasets: [
@@ -42,26 +43,31 @@ export default function ReportCharts({
       },
     ],
   };
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-      <div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 overflow-hidden">
         <h2 className="font-bold mb-2">Ventas por día (Chart.js)</h2>
         <Bar
           data={chartBarData}
           options={{
             responsive: true,
             plugins: { legend: { display: false } },
+            maintainAspectRatio: false,
           }}
+          height={220}
         />
       </div>
-      <div>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 overflow-hidden">
         <h2 className="font-bold mb-2">Ventas por usuario (Chart.js)</h2>
         <Pie
           data={chartPieData}
           options={{
             responsive: true,
             plugins: { legend: { position: "bottom" } },
+            maintainAspectRatio: false,
           }}
+          height={220}
         />
       </div>
     </div>

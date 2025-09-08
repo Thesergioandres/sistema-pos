@@ -3,11 +3,12 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-export function withRole<P extends object>(
-  Component: React.ComponentType<React.PropsWithChildren<P>>,
+// Evita inyectar `children` en el tipo de la Page para cumplir con Next.js
+export function withRole<P extends object = object>(
+  Component: React.ComponentType<P>,
   allowedRoles: string[]
 ) {
-  return function Wrapper(props: React.PropsWithChildren<P>) {
+  return function Wrapper(props: P) {
     const { data: session, status } = useSession();
     const router = useRouter();
 

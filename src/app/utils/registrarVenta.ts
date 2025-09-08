@@ -1,3 +1,4 @@
+import { authFetch } from "@/lib/http";
 // Utilidad para registrar una venta desde el frontend
 export interface ProductoVenta {
   productoId: number;
@@ -13,13 +14,14 @@ export interface VentaPayload {
   total: number;
   pagos: PagoVenta[];
   cambio: number;
+  combos?: { comboId: number; cantidad: number }[];
+  clienteId?: number;
 }
 
 export async function registrarVenta(payload: VentaPayload) {
-  const res = await fetch("/api/ventas", {
+  const res = await authFetch("/api/ventas", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: { ...payload, combos: payload.combos ?? [] },
   });
   if (!res.ok) {
     const error = await res.json().catch(() => ({}));

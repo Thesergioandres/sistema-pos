@@ -1,6 +1,8 @@
 "use client";
 import React, { useState } from "react";
 import useSWR from "swr";
+import { useAuthFetch } from "@/lib/useAuthFetch";
+import { useToast } from "@/components/toast/ToastProvider";
 
 // Tipos locales
 interface Producto {
@@ -24,16 +26,19 @@ interface ComboForm {
 }
 
 import { useSession } from "next-auth/react";
+import { withPermission } from "@/app/components/withPermission";
 
-export default function ComboFormPage() {
+function ComboFormPage() {
   const { data: session } = useSession();
+  const { swrFetcher, authFetch } = useAuthFetch();
+  const { show } = useToast();
   const sucursalId = session?.user?.sucursalId;
   const productosUrl = sucursalId
     ? `/api/productos?sucursalId=${sucursalId}`
     : "/api/productos";
   const { data: productos = [] } = useSWR<Producto[]>(
     productosUrl,
-    (url: string) => fetch(url).then((r) => r.json())
+    (url: string) => swrFetcher(url)
   );
   const [form, setForm] = useState<ComboForm>({
     nombre: "",
@@ -82,10 +87,9 @@ export default function ComboFormPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch("/api/combos", {
+      const res = await authFetch("/api/combos", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           ...form,
           precio: Number(form.precio),
           productos: form.productos.map((p) => ({
@@ -93,29 +97,34 @@ export default function ComboFormPage() {
             productoId: Number(p.productoId),
             cantidad: Number(p.cantidad),
           })),
-        }),
+        },
       });
       if (!res.ok) throw new Error("Error al crear combo");
       setSuccess("Combo creado correctamente");
+      show("Combo creado correctamente", "success");
       setForm({ nombre: "", precio: 0, productos: [] });
     } catch (err) {
       if (err instanceof Error) setError(err.message);
       else setError("Error desconocido");
+      show("Error al crear combo", "error");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="max-w-xl mx-auto p-4">
-      <h2 className="text-xl font-bold mb-4">Crear Combo / Promoción</h2>
-      <form onSubmit={handleSubmit} className="space-y-4">
+    <div className="max-w-2xl mx-auto px-4 py-6">
+      <h2 className="text-xl font-bold mb-4">Crear combo / promoción</h2>
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm"
+      >
         <input
           name="nombre"
           value={form.nombre}
           onChange={handleChange}
           placeholder="Nombre"
-          className="w-full border p-2 rounded"
+          className="w-full border p-2 rounded bg-transparent"
           required
         />
         <textarea
@@ -123,7 +132,7 @@ export default function ComboFormPage() {
           value={form.descripcion || ""}
           onChange={handleChange}
           placeholder="Descripción"
-          className="w-full border p-2 rounded"
+          className="w-full border p-2 rounded bg-transparent"
         />
         <input
           name="precio"
@@ -131,7 +140,7 @@ export default function ComboFormPage() {
           value={form.precio}
           onChange={handleChange}
           placeholder="Precio"
-          className="w-full border p-2 rounded"
+          className="w-full border p-2 rounded bg-transparent"
           required
           min={0}
           step={0.01}
@@ -142,19 +151,22 @@ export default function ComboFormPage() {
             <button
               type="button"
               onClick={agregarProducto}
-              className="bg-blue-500 text-white px-2 py-1 rounded"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
             >
               Agregar
             </button>
           </div>
           {form.productos.map((cp, i) => (
-            <div key={i} className="flex gap-2 mb-2 items-center">
+            <div
+              key={i}
+              className="flex flex-col sm:flex-row gap-2 mb-2 items-center"
+            >
               <select
                 value={cp.productoId}
                 onChange={(e) =>
                   handleProductoChange(i, "productoId", e.target.value)
                 }
-                className="border p-1 rounded"
+                className="border p-1 rounded bg-transparent"
               >
                 {productos.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -169,12 +181,12 @@ export default function ComboFormPage() {
                 onChange={(e) =>
                   handleProductoChange(i, "cantidad", e.target.value)
                 }
-                className="border p-1 rounded w-20"
+                className="border p-1 rounded w-24 bg-transparent"
               />
               <button
                 type="button"
                 onClick={() => quitarProducto(i)}
-                className="text-red-500"
+                className="text-red-600 hover:underline"
               >
                 Quitar
               </button>
@@ -191,7 +203,7 @@ export default function ComboFormPage() {
         </div>
         <button
           type="submit"
-          className="bg-green-600 text-white px-4 py-2 rounded"
+          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
           disabled={loading}
         >
           {loading ? "Guardando..." : "Guardar Combo"}
@@ -202,3 +214,5 @@ export default function ComboFormPage() {
     </div>
   );
 }
+
+export default withPermission(ComboFormPage, ["catalogo.combos"]);

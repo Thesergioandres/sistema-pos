@@ -1,8 +1,36 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+import { getServerSession } from "next-auth";
+import authOptions from "@/pages/api/auth/[...nextauth]";
+import { hasPermission } from "@/lib/permissions";
+import type { Session } from "next-auth";
 
-export async function GET() {
-  const productos = await prisma.producto.findMany();
+export async function GET(request: Request) {
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (
+    !hasPermission(session, "catalogo.productos") &&
+    session?.user?.rol !== "admin"
+  ) {
+    return NextResponse.json([]);
+  }
+  const { searchParams } = new URL(request.url);
+  const sucursalIdParam = searchParams.get("sucursalId");
+  const negocioIdParam = searchParams.get("negocioId");
+  let where: Prisma.ProductoWhereInput | undefined = undefined;
+  if (sucursalIdParam) {
+    const n = Number(sucursalIdParam);
+    if (!Number.isNaN(n))
+      where = { sucursalId: n } as unknown as Prisma.ProductoWhereInput;
+  } else if (negocioIdParam) {
+    const n = Number(negocioIdParam);
+    if (!Number.isNaN(n)) {
+      where = {
+        sucursal: { is: { negocioId: n } },
+      } as unknown as Prisma.ProductoWhereInput;
+    }
+  }
+  const productos = await prisma.producto.findMany({ where });
   return NextResponse.json(productos);
 }
 
@@ -25,6 +53,10 @@ function checkRateLimit(ip: string): boolean {
 }
 
 export async function POST(request: Request) {
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "catalogo.productos")) {
+    return NextResponse.json({ error: "Prohibido" }, { status: 403 });
+  }
   // Rate limiting por IP
   const ip = request.headers.get("x-forwarded-for") || "local";
   if (!checkRateLimit(ip)) {

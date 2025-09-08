@@ -1,13 +1,36 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
+// ...existing code...
 import dynamic from "next/dynamic";
+import Spinner from "../components/Spinner";
 const HistorialCliente = dynamic(() => import("./HistorialCliente"), {
   ssr: false,
+  loading: () => (
+    <div className="py-4 text-center">
+      <Spinner label="Cargando historial" />
+    </div>
+  ),
 });
 import useSWR from "swr";
-import NotificacionesInteligentes from "./NotificacionesInteligentes";
-import { exportarVentasExcel } from "../reportes/ExportarExcel";
-import { exportarVentasPDF } from "../reportes/ExportarPDF";
+import { useAuthFetch } from "@/lib/useAuthFetch";
+const NotificacionesInteligentes = dynamic(
+  () => import("./NotificacionesInteligentes"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="py-2 text-center">
+        <Spinner label="Cargando sugerencias" />
+      </div>
+    ),
+  }
+);
+
+interface ErroresCliente {
+  nombre?: boolean;
+  email?: boolean;
+  telefono?: boolean;
+  fechaNacimiento?: boolean;
+}
 
 interface Cliente {
   id: number;
@@ -21,223 +44,100 @@ interface Cliente {
 }
 
 import { useSession } from "next-auth/react";
-export default function ClientesPage() {
+import { withPermission } from "../components/withPermission";
+import { useToast } from "@/components/toast/ToastProvider";
+function ClientesPage() {
+  const { authFetch, swrFetcher } = useAuthFetch();
+  const { show } = useToast();
   const [form, setForm] = useState<Partial<Cliente>>({});
   const [editId, setEditId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  // Validación avanzada de campos
-  // ...los useState ya están declarados arriba...
   const { data: session } = useSession();
   const sucursalId = session?.user?.sucursalId;
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
-  // Validar rango de fechas antes de exportar (debe ir después de los useState de desde y hasta)
-  const rangoFechasValido =
-    (!desde && !hasta) ||
-    (desde &&
-      hasta &&
-      desde <= hasta &&
-      desde.length === 10 &&
-      hasta.length === 10);
-  const [clientesUrl, setClientesUrl] = useState(() => {
-    return sucursalId
-      ? `/api/clientes?sucursalId=${sucursalId}`
-      : "/api/clientes";
-  });
-  // Validación avanzada de campos
-  const validate = () => {
-    const nombreValido = form.nombre && form.nombre.length >= 2;
-    const emailValido =
-      !form.email || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email);
-    const telefonoValido =
-      !form.telefono || /^\+?[0-9\- ]{7,20}$/.test(form.telefono);
-    const fechaValida =
-      !form.fechaNacimiento || /^\d{4}-\d{2}-\d{2}$/.test(form.fechaNacimiento);
-    return {
-      nombre: !nombreValido,
-      email: !emailValido,
-      telefono: !telefonoValido,
-      fechaNacimiento: !fechaValida,
-    };
-  };
-  const errors = validate();
-  const formValido =
-    !errors.nombre &&
-    !errors.email &&
-    !errors.telefono &&
-    !errors.fechaNacimiento;
-  useEffect(() => {
-    let url = sucursalId
-      ? `/api/clientes?sucursalId=${sucursalId}`
-      : "/api/clientes";
-    const params = new URLSearchParams();
-    if (desde) params.set("desde", desde);
-    if (hasta) params.set("hasta", hasta);
-    if (params.toString()) {
-      url += (url.includes("?") ? "&" : "?") + params.toString();
-    }
-    setClientesUrl(url);
-  }, [sucursalId, desde, hasta]);
+  const clientesUrl = sucursalId
+    ? `/api/clientes?sucursalId=${sucursalId}`
+    : "/api/clientes";
   const { data: clientes = [], mutate } = useSWR<Cliente[]>(
     clientesUrl,
-    (url: string) => fetch(url).then((r) => r.json())
+    (url: string) => swrFetcher(url)
   );
-  // Eliminado: duplicado de useState
+  const [errors, setErrors] = useState<ErroresCliente>({});
+  // Validación de formulario
+  const formValido = form.nombre && form.nombre.length >= 2;
 
-  const handleChange = (
+  function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) => {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  };
+  ) {
+    setForm({ ...form, [e.target.name]: e.target.value });
+    setErrors({ ...errors, [e.target.name]: false });
+  }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setSuccess("");
+    if (!formValido) {
+      setErrors({ ...errors, nombre: true });
+      setError("Nombre requerido (mínimo 2 caracteres)");
+      return;
+    }
     setLoading(true);
     try {
-      const res = await fetch(
+      const res = await authFetch(
         editId ? `/api/clientes/${editId}` : "/api/clientes",
         {
           method: editId ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: form,
         }
       );
       if (!res.ok) throw new Error();
       setSuccess(editId ? "Cliente actualizado" : "Cliente creado");
+      show(editId ? "Cliente actualizado" : "Cliente creado", "success");
       setForm({});
       setEditId(null);
       mutate();
     } catch {
-      setError("Error al guardar cliente");
+      setError("Error al guardar");
+      show("Error al guardar", "error");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const handleEdit = (cliente: Cliente) => {
+  function handleEdit(cliente: Cliente) {
     setForm(cliente);
     setEditId(cliente.id);
-    setSuccess("");
-    setError("");
-  };
+  }
 
-  const handleDelete = async (id: number) => {
-    if (!confirm("¿Eliminar cliente?")) return;
-    setLoading(true);
+  async function handleDelete(id: number) {
     setError("");
     setSuccess("");
+    setLoading(true);
     try {
-      const res = await fetch(`/api/clientes/${id}`, { method: "DELETE" });
+      const res = await authFetch(`/api/clientes/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
       setSuccess("Cliente eliminado");
+      show("Cliente eliminado", "success");
       mutate();
     } catch {
       setError("Error al eliminar");
+      show("Error al eliminar", "error");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <div className="p-8 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Clientes</h1>
-      <div className="flex gap-2 mb-4">
-        <input
-          type="date"
-          value={desde}
-          onChange={(e) => setDesde(e.target.value)}
-          className="border p-2 rounded"
-          aria-label="Filtrar desde fecha"
-        />
-        <input
-          type="date"
-          value={hasta}
-          onChange={(e) => setHasta(e.target.value)}
-          className="border p-2 rounded"
-          aria-label="Filtrar hasta fecha"
-        />
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={async () => {
-            setError("");
-            setSuccess("");
-            if (!rangoFechasValido) {
-              setError("Rango de fechas inválido");
-              return;
-            }
-            try {
-              setLoading(true);
-              const rows = clientes.map((c) => ({
-                id: c.id,
-                producto: c.nombre,
-                cantidad: 0,
-                total: 0,
-              }));
-              await exportarVentasExcel(rows, "clientes.xlsx");
-              setSuccess("Exportación a Excel exitosa");
-            } catch {
-              setError("Error al exportar a Excel");
-            } finally {
-              setLoading(false);
-              setTimeout(() => setSuccess(""), 2500);
-            }
-          }}
-          disabled={clientes.length === 0 || loading || !rangoFechasValido}
-          aria-busy={loading}
-        >
-          {loading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar Excel
-        </button>
-        <button
-          className="bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={async () => {
-            setError("");
-            setSuccess("");
-            if (!rangoFechasValido) {
-              setError("Rango de fechas inválido");
-              return;
-            }
-            try {
-              setLoading(true);
-              const rows = clientes.map((c) => ({
-                id: c.id,
-                fecha: c.creadoEn,
-                usuarioNombre: c.nombre,
-                total: 0,
-              }));
-              await exportarVentasPDF(rows, "clientes.pdf");
-              setSuccess("Exportación a PDF exitosa");
-            } catch {
-              setError("Error al exportar a PDF");
-            } finally {
-              setLoading(false);
-              setTimeout(() => setSuccess(""), 2500);
-            }
-          }}
-          disabled={clientes.length === 0 || loading || !rangoFechasValido}
-          aria-busy={loading}
-        >
-          {loading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar PDF
-        </button>
-        {!rangoFechasValido && (
-          <span className="text-red-500 text-xs">Rango de fechas inválido</span>
-        )}
-      </div>
+    <div className="p-4 max-w-5xl mx-auto space-y-4">
+      <h1 className="text-2xl font-bold">Clientes</h1>
       <NotificacionesInteligentes />
       {error && <div className="text-red-600 mb-2">{error}</div>}
       {success && <div className="text-green-600 mb-2">{success}</div>}
       <form
         onSubmit={handleSubmit}
-        className="mb-6 bg-white dark:bg-zinc-900 p-4 rounded shadow flex flex-col gap-2"
+        className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-lg shadow-sm flex flex-col gap-2"
         aria-label="Formulario de cliente"
       >
         <input
@@ -339,25 +239,28 @@ export default function ClientesPage() {
       {error && <div className="text-red-600 mb-2">{error}</div>}
       {success && <div className="text-green-600 mb-2">{success}</div>}
       {editId && <HistorialCliente clienteId={editId} />}
-      <div className="overflow-x-auto">
-        <table className="min-w-full border">
+      <div className="table-wrapper">
+        <table className="table-base">
           <thead>
-            <tr className="bg-gray-100 dark:bg-zinc-800">
-              <th className="p-2 border">ID</th>
-              <th className="p-2 border">Nombre</th>
-              <th className="p-2 border">Email</th>
-              <th className="p-2 border">Teléfono</th>
-              <th className="p-2 border">Acciones</th>
+            <tr>
+              <th>ID</th>
+              <th>Nombre</th>
+              <th>Email</th>
+              <th>Teléfono</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {clientes.map((cliente) => (
-              <tr key={cliente.id}>
-                <td className="p-2 border text-center">{cliente.id}</td>
-                <td className="p-2 border">{cliente.nombre}</td>
-                <td className="p-2 border">{cliente.email}</td>
-                <td className="p-2 border">{cliente.telefono}</td>
-                <td className="p-2 border flex gap-2 justify-center">
+              <tr
+                key={cliente.id}
+                className="hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
+                <td className="text-center">{cliente.id}</td>
+                <td className="break-anywhere">{cliente.nombre}</td>
+                <td className="break-anywhere">{cliente.email}</td>
+                <td className="break-anywhere">{cliente.telefono}</td>
+                <td className="flex gap-2 justify-center">
                   <button
                     className="text-blue-600 hover:underline"
                     onClick={() => handleEdit(cliente)}
@@ -386,3 +289,5 @@ export default function ClientesPage() {
     </div>
   );
 }
+
+export default withPermission(ClientesPage, ["clientes.gestion"]);

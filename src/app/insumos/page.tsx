@@ -1,50 +1,73 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { withRole } from "../components/withRole";
+import React, { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { exportarVentasExcel } from "../reportes/ExportarExcel";
-import { exportarVentasPDF } from "../reportes/ExportarPDF";
+import { withRole } from "@/app/components/withRole";
+import { withPermission } from "@/app/components/withPermission";
+import { useAuthFetch } from "@/lib/useAuthFetch";
 
+// Tipos
 interface Insumo {
   id: number;
   nombre: string;
   stock: number;
   unidad: string;
-  proveedor?: string;
+  stockMinimo?: number | null;
+  proveedor?: string | null;
+  sucursalId?: number | null;
 }
+
+const initialForm: Partial<Insumo> = {
+  nombre: "",
+  stock: 0,
+  unidad: "",
+  stockMinimo: undefined,
+  proveedor: "",
+};
 
 function InsumosPage() {
   const { data: session } = useSession();
-  const [insumos, setInsumos] = useState<Insumo[]>([]);
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
-  const [form, setForm] = useState<Partial<Insumo>>({});
-  const [editId, setEditId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [touched, setTouched] = useState<{ [k: string]: boolean }>({});
+  const { authFetch } = useAuthFetch();
 
-  // Cargar insumos con filtro de sucursal activa
+  // state
+  const [insumos, setInsumos] = useState<Insumo[]>([]);
+  const [form, setForm] = useState<Partial<Insumo>>(initialForm);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string>("");
+  const [success, setSuccess] = useState<string>("");
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const sucursalId = useMemo(() => {
+    const id = session?.user?.sucursalId;
+    if (id === undefined || id === null) return undefined;
+    const n = Number(id);
+    return Number.isNaN(n) ? undefined : n;
+  }, [session]);
+
+  // helpers
+  const resetFeedback = () => {
+    setError("");
+    setSuccess("");
+  };
 
   const fetchInsumos = async () => {
-    setLoading(true);
     try {
-      let url = "/api/insumos";
+      setLoading(true);
+      resetFeedback();
       const params = new URLSearchParams();
-      const sucursalId = session?.user?.sucursalId;
-      if (sucursalId) params.set("sucursalId", String(sucursalId));
-      if (desde) params.set("desde", desde);
-      if (hasta) params.set("hasta", hasta);
-      if (Array.from(params).length > 0) {
-        url += `?${params.toString()}`;
-      }
-      const res = await fetch(url);
+      if (sucursalId !== undefined)
+        params.set("sucursalId", String(sucursalId));
+      const url = params.toString()
+        ? `/api/insumos?${params.toString()}`
+        : "/api/insumos";
+      const res = await authFetch(url);
+      if (!res.ok) throw new Error("No se pudo obtener la lista de insumos");
       const data = await res.json();
-      setInsumos(data);
-    } catch {
-      setError("Error al cargar insumos");
+      setInsumos(Array.isArray(data) ? data : []);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || "Error al cargar insumos");
     } finally {
       setLoading(false);
     }
@@ -53,303 +76,318 @@ function InsumosPage() {
   useEffect(() => {
     fetchInsumos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.sucursalId, desde, hasta]);
+  }, [sucursalId]);
 
-  // Manejar cambios en el formulario
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
-  const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    setTouched({ ...touched, [e.target.name]: true });
+  // form handlers
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      [name]:
+        name === "stock" || name === "stockMinimo" ? Number(value) : value,
+    }));
   };
 
-  // Validación avanzada
-  const validate = () => {
-    const nombreValido =
-      form.nombre && /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ0-9 .,'-]{2,50}$/.test(form.nombre);
-    const stockValido =
-      form.stock !== undefined &&
-      !isNaN(Number(form.stock)) &&
-      Number(form.stock) >= 0 &&
-      Number(form.stock) <= 100000;
-    const unidadValida =
-      form.unidad && /^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ]{1,10}$/.test(form.unidad);
+  const handleBlur = (
+    e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>
+  ) => {
+    const { name } = e.target;
+    setTouched((prev) => ({ ...prev, [name]: true }));
+  };
+
+  const validate = (f: Partial<Insumo>) => {
+    const nombreOk = !!f.nombre && f.nombre.trim().length >= 2;
+    const stockOk = typeof f.stock === "number" && f.stock >= 0;
+    const unidadOk = !!f.unidad && f.unidad.trim().length > 0;
+    const stockMinimoOk =
+      f.stockMinimo === undefined ||
+      f.stockMinimo === null ||
+      f.stockMinimo >= 0;
+
     return {
-      nombre: !nombreValido,
-      stock: !stockValido,
-      unidad: !unidadValida,
-    };
+      nombre: nombreOk,
+      stock: stockOk,
+      unidad: unidadOk,
+      stockMinimo: stockMinimoOk,
+    } as const;
   };
-  const errors = validate();
-  const formValido = !errors.nombre && !errors.stock && !errors.unidad;
 
-  // Crear o actualizar insumo
+  const errors = useMemo(() => validate(form), [form]);
+  const formValido =
+    errors.nombre && errors.stock && errors.unidad && errors.stockMinimo;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setTouched({ nombre: true, stock: true, unidad: true });
-    if (!formValido) return;
-    setLoading(true);
-    setError("");
-    setSuccess("");
+    resetFeedback();
+
+    if (!formValido) {
+      setError("Por favor, corrige los errores del formulario.");
+      return;
+    }
+
     try {
-      const res = await fetch(
+      setLoading(true);
+      const payload: {
+        nombre: string | undefined;
+        stock: number;
+        unidad: string | undefined;
+        stockMinimo: number;
+        proveedor: string | null;
+      } = {
+        nombre: form.nombre?.toString().trim(),
+        stock: Number(form.stock ?? 0),
+        unidad: form.unidad?.toString().trim(),
+        stockMinimo: Number(
+          form.stockMinimo === undefined || form.stockMinimo === null
+            ? 0
+            : form.stockMinimo
+        ),
+        proveedor:
+          form.proveedor && form.proveedor.toString().trim().length > 0
+            ? form.proveedor.toString().trim()
+            : null,
+      };
+
+      const res = await authFetch(
         editId ? `/api/insumos/${editId}` : "/api/insumos",
         {
           method: editId ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: payload,
         }
       );
-      if (!res.ok) throw new Error("Error en la operación");
+      if (!res.ok) throw new Error("No se pudo guardar el insumo");
+
       setSuccess(editId ? "Insumo actualizado" : "Insumo creado");
-      setForm({});
-      setEditId(null);
+      setForm(initialForm);
       setTouched({});
-      fetchInsumos();
-    } catch {
-      setError("Error al guardar insumo");
+      setEditId(null);
+      await fetchInsumos();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || "Error al guardar");
     } finally {
       setLoading(false);
     }
   };
 
-  // Editar insumo
   const handleEdit = (insumo: Insumo) => {
-    setForm(insumo);
+    resetFeedback();
     setEditId(insumo.id);
-    setSuccess("");
-    setError("");
+    setForm({
+      nombre: insumo.nombre,
+      stock: insumo.stock,
+      unidad: insumo.unidad,
+      stockMinimo: insumo.stockMinimo ?? undefined,
+      proveedor: insumo.proveedor ?? "",
+    });
     setTouched({});
   };
 
-  // Eliminar insumo
   const handleDelete = async (id: number) => {
-    if (!confirm("¿Eliminar insumo?")) return;
-    setLoading(true);
-    setError("");
-    setSuccess("");
+    if (!id) return;
+    resetFeedback();
     try {
-      const res = await fetch(`/api/insumos/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error();
+      setLoading(true);
+      const res = await authFetch(`/api/insumos/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("No se pudo eliminar el insumo");
       setSuccess("Insumo eliminado");
-      fetchInsumos();
-    } catch {
-      setError("Error al eliminar");
+      await fetchInsumos();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || "Error al eliminar");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="p-8 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Insumos</h1>
-      <div className="flex gap-2 mb-4">
-        <input
-          type="date"
-          value={desde}
-          onChange={(e) => setDesde(e.target.value)}
-          className="border p-2 rounded"
-          aria-label="Filtrar desde fecha"
-        />
-        <input
-          type="date"
-          value={hasta}
-          onChange={(e) => setHasta(e.target.value)}
-          className="border p-2 rounded"
-          aria-label="Filtrar hasta fecha"
-        />
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={() => {
-            const rows = insumos.map((i) => ({
-              id: i.id,
-              producto: i.nombre,
-              cantidad: i.stock,
-              total: 0,
-            }));
-            exportarVentasExcel(rows, "insumos.xlsx");
-          }}
-          disabled={insumos.length === 0 || loading}
-          aria-busy={loading}
-        >
-          {loading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar Excel
-        </button>
-        <button
-          className="bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={() => {
-            const rows = insumos.map((i) => ({
-              id: i.id,
-              fecha: "",
-              usuarioNombre: i.proveedor || "",
-              total: i.stock,
-            }));
-            exportarVentasPDF(rows, "insumos.pdf");
-          }}
-          disabled={insumos.length === 0 || loading}
-          aria-busy={loading}
-        >
-          {loading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar PDF
-        </button>
-      </div>
-      {error && <div className="text-red-600 mb-2">{error}</div>}
-      {success && <div className="text-green-600 mb-2">{success}</div>}
-      <form
-        onSubmit={handleSubmit}
-        className="mb-6 bg-white dark:bg-zinc-900 p-4 rounded shadow flex flex-col gap-2"
-        aria-label="Formulario de insumo"
-      >
-        <input
-          name="nombre"
-          placeholder="Nombre (2-50 letras/números)"
-          value={form.nombre || ""}
-          onChange={handleChange}
-          onBlur={handleBlur}
-          required
-          minLength={2}
-          maxLength={50}
-          pattern="[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ0-9 .,'-]{2,50}"
-          className={`border p-2 rounded ${
-            touched.nombre && errors.nombre ? "border-red-500" : ""
-          }`}
-        />
-        {touched.nombre && errors.nombre && (
-          <span className="text-red-500 text-xs">
-            Nombre inválido (2-50 letras/números)
-          </span>
-        )}
-        <input
-          name="stock"
-          type="number"
-          placeholder="Stock (0-100000)"
-          value={form.stock ?? ""}
-          onChange={handleChange}
-          onBlur={handleBlur}
-          required
-          min={0}
-          max={100000}
-          className={`border p-2 rounded ${
-            touched.stock && errors.stock ? "border-red-500" : ""
-          }`}
-        />
-        {touched.stock && errors.stock && (
-          <span className="text-red-500 text-xs">
-            Stock inválido (0-100000)
-          </span>
-        )}
-        <input
-          name="unidad"
-          placeholder="Unidad (ej: kg, l, pza)"
-          value={form.unidad || ""}
-          onChange={handleChange}
-          onBlur={handleBlur}
-          required
-          minLength={1}
-          maxLength={10}
-          pattern="[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ]{1,10}"
-          className={`border p-2 rounded ${
-            touched.unidad && errors.unidad ? "border-red-500" : ""
-          }`}
-        />
-        {touched.unidad && errors.unidad && (
-          <span className="text-red-500 text-xs">
-            Unidad inválida (solo letras, 1-10)
-          </span>
-        )}
-        <input
-          name="proveedor"
-          placeholder="Proveedor (opcional)"
-          value={form.proveedor || ""}
-          onChange={handleChange}
-          className="border p-2 rounded"
-        />
-        <button
-          type="submit"
-          className="bg-blue-600 text-white px-4 py-2 rounded mt-2 hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-          disabled={loading || !formValido}
-        >
-          {loading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          {editId ? "Actualizar" : "Crear"}
-        </button>
-        {editId && (
-          <button
-            type="button"
-            className="text-sm text-gray-500 underline"
-            onClick={() => {
-              setForm({});
-              setEditId(null);
-              setTouched({});
-            }}
-          >
-            Cancelar edición
-          </button>
-        )}
-      </form>
-      {error && <div className="text-red-600 mb-2">{error}</div>}
-      {success && <div className="text-green-600 mb-2">{success}</div>}
-      {loading && (
-        <div className="flex items-center gap-2 text-blue-600">
-          <span className="animate-spin h-4 w-4 border-2 border-blue-600 border-t-transparent rounded-full"></span>
-          Cargando...
+    <div className="p-4 max-w-6xl mx-auto space-y-6">
+      <h1 className="text-2xl font-semibold">Insumos</h1>
+
+      {error && (
+        <div className="rounded border border-red-300 bg-black p-3 text-red-700">
+          {error}
         </div>
       )}
-      <div className="overflow-x-auto">
-        <table className="min-w-full border">
-          <thead>
-            <tr className="bg-gray-100 dark:bg-zinc-800">
-              <th className="p-2 border">ID</th>
-              <th className="p-2 border">Nombre</th>
-              <th className="p-2 border">Stock</th>
-              <th className="p-2 border">Unidad</th>
-              <th className="p-2 border">Proveedor</th>
-              <th className="p-2 border">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {insumos.map((insumo) => (
-              <tr key={insumo.id}>
-                <td className="p-2 border text-center">{insumo.id}</td>
-                <td className="p-2 border">{insumo.nombre}</td>
-                <td className="p-2 border text-right">{insumo.stock}</td>
-                <td className="p-2 border">{insumo.unidad}</td>
-                <td className="p-2 border">{insumo.proveedor || "-"}</td>
-                <td className="p-2 border flex gap-2 justify-center">
-                  <button
-                    className="text-blue-600 hover:underline"
-                    onClick={() => handleEdit(insumo)}
-                  >
-                    Editar
-                  </button>
-                  {session?.user?.rol === "admin" && (
-                    <button
-                      className="text-red-600 hover:underline"
-                      onClick={() => handleDelete(insumo.id)}
-                    >
-                      Eliminar
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {insumos.length === 0 && (
-              <tr>
-                <td colSpan={6} className="p-4 text-center text-gray-500">
-                  No hay insumos registrados
-                </td>
-              </tr>
+      {success && (
+        <div className="rounded border border-green-300 bg-black p-3 text-green-700">
+          {success}
+        </div>
+      )}
+
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-lg shadow-sm"
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium">Nombre</label>
+            <input
+              name="nombre"
+              value={form.nombre ?? ""}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              className="mt-1 w-full rounded border p-2"
+              placeholder="Ej: Botella 1L"
+            />
+            {touched.nombre && !errors.nombre && (
+              <p className="text-xs text-red-600 mt-1">
+                Ingresa al menos 2 caracteres.
+              </p>
             )}
-          </tbody>
-        </table>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium">Stock</label>
+            <input
+              type="number"
+              min={0}
+              name="stock"
+              value={form.stock ?? 0}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              className="mt-1 w-full rounded border p-2"
+            />
+            {touched.stock && !errors.stock && (
+              <p className="text-xs text-red-600 mt-1">
+                Debe ser un número mayor o igual a 0.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium">Unidad</label>
+            <input
+              name="unidad"
+              value={form.unidad ?? ""}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              className="mt-1 w-full rounded border p-2"
+              placeholder="Ej: unidades, litros, kg"
+            />
+            {touched.unidad && !errors.unidad && (
+              <p className="text-xs text-red-600 mt-1">
+                La unidad es obligatoria.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium">Stock mínimo</label>
+            <input
+              type="number"
+              min={0}
+              name="stockMinimo"
+              value={form.stockMinimo ?? ""}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              className="mt-1 w-full rounded border p-2"
+              placeholder="Opcional"
+            />
+            {touched.stockMinimo && !errors.stockMinimo && (
+              <p className="text-xs text-red-600 mt-1">
+                Debe ser un número mayor o igual a 0.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium">Proveedor</label>
+            <input
+              name="proveedor"
+              value={form.proveedor ?? ""}
+              onChange={handleChange}
+              onBlur={handleBlur}
+              className="mt-1 w-full rounded border p-2"
+              placeholder="Opcional"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="submit"
+            disabled={!formValido || loading}
+            className="rounded bg-blue-600 text-white px-4 py-2 disabled:opacity-50"
+          >
+            {editId ? "Actualizar" : "Crear"}
+          </button>
+          {editId && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditId(null);
+                setForm(initialForm);
+                setTouched({});
+              }}
+              className="rounded border px-4 py-2"
+            >
+              Cancelar edición
+            </button>
+          )}
+        </div>
+      </form>
+
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-sm">
+        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 font-medium">
+          Listado
+        </div>
+        <div className="table-wrapper">
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th className="text-left">Nombre</th>
+                <th className="text-left">Stock</th>
+                <th className="text-left">Unidad</th>
+                <th className="text-left">Stock mínimo</th>
+                <th className="text-left">Proveedor</th>
+                <th className="text-left">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {insumos.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="text-center p-4 text-gray-500">
+                    {loading ? "Cargando..." : "Sin registros"}
+                  </td>
+                </tr>
+              )}
+              {insumos.map((i) => (
+                <tr key={i.id} className="border-t">
+                  <td className="break-anywhere">{i.nombre}</td>
+                  <td>{i.stock}</td>
+                  <td>{i.unidad}</td>
+                  <td>{i.stockMinimo ?? "-"}</td>
+                  <td className="break-anywhere">{i.proveedor ?? "-"}</td>
+                  <td>
+                    <div className="flex gap-2">
+                      <button
+                        className="px-2 py-1 rounded border"
+                        onClick={() => handleEdit(i)}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        className="px-2 py-1 rounded border text-red-600 border-red-300"
+                        onClick={() => handleDelete(i.id)}
+                        disabled={loading}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 }
 
-export default withRole(InsumosPage, ["admin", "supervisor"]);
+export default withPermission(withRole(InsumosPage, ["admin", "supervisor"]), [
+  "catalogo.insumos",
+]);

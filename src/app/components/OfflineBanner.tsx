@@ -17,7 +17,7 @@ export default function OfflineBanner() {
 
   if (!offline) return null;
   return (
-    <div className="fixed top-0 left-0 w-full bg-red-600 text-white text-center py-2 z-50 shadow">
+    <div className="w-full bg-red-600/90 text-white text-center py-2 rounded-md mt-2 shadow">
       Estás sin conexión. Algunas funciones pueden estar limitadas.
     </div>
   );

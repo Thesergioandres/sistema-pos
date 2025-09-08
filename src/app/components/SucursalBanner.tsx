@@ -20,16 +20,16 @@ export default function SucursalBanner() {
   }, [sucursalId]);
 
   return (
-    <div className="bg-blue-200 text-blue-900 px-4 py-2 text-base font-bold text-center shadow-sm border-b border-blue-300 flex flex-col items-center gap-1">
+    <div className="bg-black text-zinc-100 px-4 py-2 text-base font-bold text-center shadow-sm border-b border-zinc-700 flex flex-col items-center gap-1">
       <div>
         <span className="mr-2">🏢</span>
         Operando en sucursal:{" "}
         {sucursalId ? (
-          <span className="underline">
+          <span className="underline text-blue-400">
             {nombre ? nombre : `#${sucursalId}`}
           </span>
         ) : (
-          <span className="italic">Sin sucursal</span>
+          <span className="italic text-red-400">Sin sucursal</span>
         )}
       </div>
       <SucursalSelector />

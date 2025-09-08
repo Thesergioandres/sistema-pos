@@ -1,12 +1,27 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import authOptions from "@/pages/api/auth/[...nextauth]";
+import type { Session } from "next-auth";
+import { hasPermission } from "@/lib/permissions";
 
 // GET: Listar clientes
 export async function GET() {
-  const clientes = await prisma.cliente.findMany({
-    orderBy: { nombre: "asc" },
-  });
-  return NextResponse.json(clientes);
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!session?.user) {
+    return NextResponse.json({ error: "No autenticado" }, { status: 401 });
+  }
+  if (
+    hasPermission(session, "clientes.gestion") ||
+    session.user.rol === "admin"
+  ) {
+    const clientes = await prisma.cliente.findMany({
+      orderBy: { nombre: "asc" },
+    });
+    return NextResponse.json(clientes);
+  }
+  // Sin permiso, devolver 200 con lista vacía para evitar ruido en UI
+  return NextResponse.json([]);
 }
 
 // Simple rate limiting (memory, por IP)
@@ -29,6 +44,10 @@ function checkRateLimit(ip: string): boolean {
 
 // POST: Crear cliente
 export async function POST(req: Request) {
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "clientes.gestion")) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
   // Rate limiting por IP
   const ip = req.headers.get("x-forwarded-for") || "local";
   if (!checkRateLimit(ip)) {

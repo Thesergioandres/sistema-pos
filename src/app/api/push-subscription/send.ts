@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import authOptions from "@/pages/api/auth/[...nextauth]";
+import type { Session } from "next-auth";
+import { hasPermission } from "@/lib/permissions";
 import webpush from "web-push";
 
 const vapidKeys = {
@@ -15,6 +19,10 @@ webpush.setVapidDetails(
 
 // POST: Enviar notificación push a todos los suscritos
 export async function POST(req: Request) {
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "notificaciones.enviar")) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
   const { title, body } = await req.json();
   const subs = await prisma.pushSubscription.findMany();
   let success = 0,

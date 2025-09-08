@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import authOptions from "@/pages/api/auth/[...nextauth]";
+import type { Session } from "next-auth";
+import { hasPermission } from "@/lib/permissions";
 
 // GET /api/combos/[id] - Obtiene un combo por ID
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "catalogo.combos")) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (isNaN(id))
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   const combo = await prisma.combo.findUnique({
@@ -27,9 +36,14 @@ export async function GET(
 // PUT /api/combos/[id] - Actualiza un combo
 export async function PUT(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "catalogo.combos")) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (isNaN(id))
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   const data = await req.json();
@@ -61,9 +75,14 @@ export async function PUT(
 // DELETE /api/combos/[id] - Elimina un combo
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = Number(params.id);
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "catalogo.combos")) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+  }
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (isNaN(id))
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
   await prisma.combo.delete({ where: { id } });

@@ -1,9 +1,21 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import authOptions from "@/pages/api/auth/[...nextauth]";
+import type { Session } from "next-auth";
+import { hasPermission } from "@/lib/permissions";
 import { hash } from "bcryptjs";
 
-export async function GET() {
-  const usuarios = await prisma.usuario.findMany();
+export async function GET(request: Request) {
+  const session = (await getServerSession(authOptions)) as Session | null;
+  if (!hasPermission(session, "usuarios.gestion")) {
+    // Evitar 403 en UI que solo necesita nombres: devolver lista vacía
+    return NextResponse.json([]);
+  }
+  const { searchParams } = new URL(request.url);
+  const sucursalId = searchParams.get("sucursalId");
+  const where = sucursalId ? { sucursalId: Number(sucursalId) } : {};
+  const usuarios = await prisma.usuario.findMany({ where });
   return NextResponse.json(usuarios);
 }
 
@@ -26,6 +38,15 @@ function checkRateLimit(ip: string): boolean {
 }
 
 export async function POST(request: Request) {
+  // Permitir crear el primer usuario sin permisos
+  const totalUsuarios = await prisma.usuario.count();
+  let session: Session | null = null;
+  if (totalUsuarios > 0) {
+    session = (await getServerSession(authOptions)) as Session | null;
+    if (!hasPermission(session, "usuarios.gestion")) {
+      return NextResponse.json({ error: "No autorizado" }, { status: 403 });
+    }
+  }
   // Rate limiting por IP
   const ip = request.headers.get("x-forwarded-for") || "local";
   if (!checkRateLimit(ip)) {
@@ -53,8 +74,6 @@ export async function POST(request: Request) {
     }
     // Hash de contraseña
     const hashed = await hash(password, 10);
-    // ¿Es el primer usuario?
-    const totalUsuarios = await prisma.usuario.count();
     const rol = totalUsuarios === 0 ? "admin" : "cajero";
     const nuevo = await prisma.usuario.create({
       data: {

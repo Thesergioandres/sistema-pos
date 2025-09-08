@@ -1,12 +1,12 @@
+"use client";
 interface Sucursal {
   id: number;
   nombre: string;
 }
 import React, { useEffect, useState } from "react";
-import { exportarVentasExcel } from "../reportes/ExportarExcel";
-import { exportarVentasPDF } from "../reportes/ExportarPDF";
 import useSWR from "swr";
 import { withRole } from "../components/withRole";
+import { withPermission } from "../components/withPermission";
 
 interface Usuario {
   id: number;
@@ -16,49 +16,44 @@ interface Usuario {
   rol: string;
   sucursalId?: number;
   sucursal?: { id: number; nombre: string };
+  permisos?: Record<string, boolean>;
 }
 
 import { useSession } from "next-auth/react";
+import { useAuthFetch } from "@/lib/useAuthFetch";
+import { useToast } from "@/components/toast/ToastProvider";
 
 function UsuariosPage() {
   const { data: session } = useSession();
+  const { swrFetcher, authFetch } = useAuthFetch();
+  const { show } = useToast();
   const sucursalId = session?.user?.sucursalId;
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
   const [usuariosUrl, setUsuariosUrl] = useState(() => {
     return sucursalId
       ? `/api/usuarios?sucursalId=${sucursalId}`
       : "/api/usuarios";
   });
   useEffect(() => {
-    let url = sucursalId
+    const url = sucursalId
       ? `/api/usuarios?sucursalId=${sucursalId}`
       : "/api/usuarios";
-    const params = new URLSearchParams();
-    if (desde) params.set("desde", desde);
-    if (hasta) params.set("hasta", hasta);
-    if (params.toString()) {
-      url += (url.includes("?") ? "&" : "?") + params.toString();
-    }
     setUsuariosUrl(url);
-  }, [sucursalId, desde, hasta]);
+  }, [sucursalId]);
   const {
     data: usuarios = [],
     error: usuariosError,
     isLoading: usuariosLoading,
     mutate: mutateUsuarios,
-  } = useSWR<Usuario[]>(usuariosUrl, (url: string) =>
-    fetch(url).then((r) => r.json())
-  );
+  } = useSWR<Usuario[]>(usuariosUrl, (url: string) => swrFetcher(url));
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
 
   useEffect(() => {
     // fetchUsuarios eliminado, SWR lo maneja
     // Cargar sucursales para el select
-    fetch("/api/sucursales")
+    authFetch("/api/sucursales")
       .then((res) => res.json())
       .then((data) => setSucursales(data));
-  }, []);
+  }, [authFetch]);
   const [touched, setTouched] = useState<{ [k: string]: boolean }>({});
   const [form, setForm] = useState<
     Partial<Usuario> & { confirmPassword?: string }
@@ -109,6 +104,55 @@ function UsuariosPage() {
   ) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
+  const handlePermisoToggle = (key: string) => {
+    setForm((prev) => ({
+      ...prev,
+      permisos: { ...(prev.permisos || {}), [key]: !prev?.permisos?.[key] },
+    }));
+  };
+  // Plantillas rápidas de permisos
+  const templates: Record<string, Record<string, boolean>> = {
+    ADMIN: {
+      "ventas.registrar": true,
+      "ventas.listado": true,
+      "ventas.detalle": true,
+      "ventas.pendientes": true,
+      "ventas.pagos": true,
+      "catalogo.productos": true,
+      "catalogo.insumos": true,
+      "catalogo.recetas": true,
+      "catalogo.combos": true,
+      "clientes.gestion": true,
+      "reportes.ver": true,
+      "sucursales.gestion": true,
+      "usuarios.gestion": true,
+      "notificaciones.enviar": true,
+    },
+    SUPERVISOR: {
+      "ventas.listado": true,
+      "ventas.detalle": true,
+      "ventas.pagos": true,
+      "catalogo.productos": true,
+      "catalogo.insumos": true,
+      "catalogo.recetas": true,
+      "catalogo.combos": true,
+      "reportes.ver": true,
+    },
+    VENTAS: {
+      "ventas.registrar": true,
+      "ventas.detalle": true,
+      "ventas.pendientes": true,
+      "ventas.listado": true,
+      "ventas.pagos": true,
+    },
+    REPORTES: {
+      "reportes.ver": true,
+    },
+  };
+  async function applyTemplateToForm(t: keyof typeof templates) {
+    const permisos = templates[t];
+    setForm((prev) => ({ ...prev, permisos }));
+  }
   const handleBlur = (
     e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>
   ) => {
@@ -122,21 +166,22 @@ function UsuariosPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch(
+      const res = await authFetch(
         editId ? `/api/usuarios/${editId}` : "/api/usuarios",
         {
           method: editId ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: form,
         }
       );
       if (!res.ok) throw new Error("Error en la operación");
       setSuccess(editId ? "Usuario actualizado" : "Usuario creado");
+      show(editId ? "Usuario actualizado" : "Usuario creado", "success");
       setForm({});
       setEditId(null);
       mutateUsuarios();
     } catch {
       setError("Error al guardar usuario");
+      show("Error al guardar usuario", "error");
     } finally {
       setLoading(false);
     }
@@ -157,9 +202,10 @@ function UsuariosPage() {
     setError("");
     setSuccess("");
     try {
-      const res = await fetch(`/api/usuarios/${id}`, { method: "DELETE" });
+      const res = await authFetch(`/api/usuarios/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error();
       setSuccess("Usuario eliminado");
+      show("Usuario eliminado", "success");
       mutateUsuarios();
     } catch {
       setError("Error al eliminar");
@@ -169,64 +215,9 @@ function UsuariosPage() {
   };
 
   return (
-    <div className="p-8 max-w-2xl mx-auto">
+    <div className="p-4 max-w-6xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Usuarios</h1>
-      <div className="flex gap-2 mb-4">
-        <input
-          type="date"
-          value={desde}
-          onChange={(e) => setDesde(e.target.value)}
-          className="border p-2 rounded"
-          aria-label="Filtrar desde fecha"
-        />
-        <input
-          type="date"
-          value={hasta}
-          onChange={(e) => setHasta(e.target.value)}
-          className="border p-2 rounded"
-          aria-label="Filtrar hasta fecha"
-        />
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={() => {
-            const rows = usuarios.map((u) => ({
-              id: u.id,
-              producto: u.nombre,
-              cantidad: 0,
-              total: 0,
-            }));
-            exportarVentasExcel(rows, "usuarios.xlsx");
-          }}
-          disabled={usuarios.length === 0 || usuariosLoading}
-          aria-busy={usuariosLoading}
-        >
-          {usuariosLoading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar Excel
-        </button>
-        <button
-          className="bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={() => {
-            const rows = usuarios.map((u) => ({
-              id: u.id,
-              fecha: undefined,
-              usuarioNombre: u.nombre,
-              email: u.email,
-              rol: u.rol,
-              sucursal: u.sucursal?.nombre || "",
-            }));
-            exportarVentasPDF(rows, "usuarios.pdf");
-          }}
-          disabled={usuarios.length === 0 || usuariosLoading}
-          aria-busy={usuariosLoading}
-        >
-          {usuariosLoading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar PDF
-        </button>
-      </div>
+      {/* ...el resto del código permanece igual, sin filtros de fecha ni botones de exportación... */}
       {usuariosLoading && (
         <div className="text-center py-4">Cargando usuarios...</div>
       )}
@@ -237,9 +228,40 @@ function UsuariosPage() {
       {success && <div className="text-green-600 mb-2">{success}</div>}
       <form
         onSubmit={handleSubmit}
-        className="mb-6 bg-white dark:bg-zinc-900 p-4 rounded shadow flex flex-col gap-2"
+        className="mb-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-lg shadow-sm flex flex-col gap-2"
         aria-label="Formulario de usuario"
       >
+        <div className="flex flex-wrap gap-2 mb-2">
+          <span className="text-sm text-zinc-600">Plantillas:</span>
+          <button
+            type="button"
+            className="btn btn-xs"
+            onClick={() => applyTemplateToForm("ADMIN")}
+          >
+            Admin
+          </button>
+          <button
+            type="button"
+            className="btn btn-xs"
+            onClick={() => applyTemplateToForm("SUPERVISOR")}
+          >
+            Supervisor
+          </button>
+          <button
+            type="button"
+            className="btn btn-xs"
+            onClick={() => applyTemplateToForm("VENTAS")}
+          >
+            Ventas/Cajero
+          </button>
+          <button
+            type="button"
+            className="btn btn-xs"
+            onClick={() => applyTemplateToForm("REPORTES")}
+          >
+            Solo reportes
+          </button>
+        </div>
         <input
           name="email"
           type="email"
@@ -344,6 +366,43 @@ function UsuariosPage() {
             </option>
           ))}
         </select>
+        <fieldset className="mt-2 border rounded p-2">
+          <legend className="text-sm font-medium">Permisos</legend>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            {[
+              { key: "ventas.registrar", label: "Ventas - Registrar" },
+              { key: "ventas.listado", label: "Ventas - Listado" },
+              { key: "ventas.detalle", label: "Ventas - Detalle" },
+              { key: "ventas.pendientes", label: "Ventas - Pendientes" },
+              { key: "ventas.pagos", label: "Ventas - Registrar pagos" },
+              { key: "catalogo.productos", label: "Catálogo - Productos" },
+              { key: "catalogo.insumos", label: "Catálogo - Insumos" },
+              { key: "catalogo.recetas", label: "Catálogo - Recetas" },
+              { key: "catalogo.combos", label: "Catálogo - Combos" },
+              { key: "clientes.gestion", label: "Clientes - Gestionar" },
+              { key: "reportes.ver", label: "Reportes - Ver" },
+              {
+                key: "notificaciones.enviar",
+                label: "Notificaciones - Enviar",
+              },
+              { key: "sucursales.gestion", label: "Sucursales - Gestionar" },
+              { key: "usuarios.gestion", label: "Usuarios - Gestionar" },
+            ].map((p) => (
+              <label key={p.key} className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.permisos?.[p.key])}
+                  onChange={() => handlePermisoToggle(p.key)}
+                />
+                {p.label}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-zinc-500 mt-1">
+            Sugerencia: para administradores, marca todos; para vendedores,
+            marca las opciones de ventas necesarias.
+          </p>
+        </fieldset>
         {touched.rol && errors.rol && (
           <span className="text-red-500 text-xs">Selecciona un rol válido</span>
         )}
@@ -369,25 +428,29 @@ function UsuariosPage() {
       </form>
       {error && <div className="text-red-600 mb-2">{error}</div>}
       {success && <div className="text-green-600 mb-2">{success}</div>}
-      <div className="overflow-x-auto">
-        <table className="min-w-full border">
+      <div className="table-wrapper">
+        <table className="table-base">
           <thead>
-            <tr className="bg-gray-100 dark:bg-zinc-800">
-              <th className="p-2 border">ID</th>
-              <th className="p-2 border">Email</th>
-              <th className="p-2 border">Nombre</th>
-              <th className="p-2 border">Rol</th>
-              <th className="p-2 border">Sucursal</th>
-              <th className="p-2 border">Acciones</th>
+            <tr>
+              <th>ID</th>
+              <th>Email</th>
+              <th>Nombre</th>
+              <th>Rol</th>
+              <th>Permisos</th>
+              <th>Sucursal</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {usuarios.map((usuario) => (
-              <tr key={usuario.id}>
-                <td className="p-2 border text-center">{usuario.id}</td>
-                <td className="p-2 border">{usuario.email}</td>
-                <td className="p-2 border">{usuario.nombre}</td>
-                <td className="p-2 border">
+              <tr
+                key={usuario.id}
+                className="hover:bg-zinc-50 dark:hover:bg-zinc-800"
+              >
+                <td className="text-center">{usuario.id}</td>
+                <td className="break-anywhere">{usuario.email}</td>
+                <td className="break-anywhere">{usuario.nombre}</td>
+                <td>
                   <select
                     value={usuario.rol}
                     onChange={async (e) => {
@@ -397,16 +460,20 @@ function UsuariosPage() {
                       setError("");
                       setSuccess("");
                       try {
-                        const res = await fetch(`/api/usuarios/${usuario.id}`, {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ rol: nuevoRol }),
-                        });
+                        const res = await authFetch(
+                          `/api/usuarios/${usuario.id}`,
+                          {
+                            method: "PUT",
+                            body: { rol: nuevoRol },
+                          }
+                        );
                         if (!res.ok) throw new Error();
                         setSuccess("Rol actualizado");
+                        show("Rol actualizado", "success");
                         mutateUsuarios();
                       } catch {
                         setError("Error al actualizar rol");
+                        show("Error al actualizar rol", "error");
                       } finally {
                         setLoading(false);
                       }
@@ -418,7 +485,66 @@ function UsuariosPage() {
                     <option value="cajero">Cajero</option>
                   </select>
                 </td>
-                <td className="p-2 border text-center">
+                <td>
+                  <div className="flex flex-col text-xs gap-1 max-w-[240px]">
+                    {Object.entries(
+                      usuario.permisos ||
+                        ({
+                          // Mostrar claves comunes si no hay permisos aún
+                          "ventas.registrar": false,
+                          "ventas.listado": false,
+                          "ventas.detalle": false,
+                          "ventas.pendientes": false,
+                          "ventas.pagos": false,
+                          "catalogo.productos": false,
+                          "catalogo.insumos": false,
+                          "catalogo.recetas": false,
+                          "catalogo.combos": false,
+                          "clientes.gestion": false,
+                          "reportes.ver": false,
+                          "notificaciones.enviar": false,
+                          "sucursales.gestion": false,
+                          "usuarios.gestion": false,
+                        } as Record<string, boolean>)
+                    ).map(([k, v]) => (
+                      <label key={k} className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(v)}
+                          onChange={async () => {
+                            setLoading(true);
+                            setError("");
+                            setSuccess("");
+                            try {
+                              const nuevos = {
+                                ...(usuario.permisos || {}),
+                                [k]: !v,
+                              } as Record<string, boolean>;
+                              const res = await authFetch(
+                                `/api/usuarios/${usuario.id}`,
+                                {
+                                  method: "PUT",
+                                  body: { permisos: nuevos },
+                                }
+                              );
+                              if (!res.ok) throw new Error();
+                              setSuccess("Permisos actualizados");
+                              show("Permisos actualizados", "success");
+                              mutateUsuarios();
+                            } catch {
+                              setError("Error al actualizar permisos");
+                              show("Error al actualizar permisos", "error");
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                        />
+                        {k}
+                      </label>
+                    ))}
+                  </div>
+                </td>
+                <td className="text-center">
                   <select
                     value={usuario.sucursalId || ""}
                     onChange={async (e) => {
@@ -428,16 +554,20 @@ function UsuariosPage() {
                       setError("");
                       setSuccess("");
                       try {
-                        const res = await fetch(`/api/usuarios/${usuario.id}`, {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ sucursalId: nuevaSucursalId }),
-                        });
+                        const res = await authFetch(
+                          `/api/usuarios/${usuario.id}`,
+                          {
+                            method: "PUT",
+                            body: { sucursalId: nuevaSucursalId },
+                          }
+                        );
                         if (!res.ok) throw new Error();
                         setSuccess("Sucursal actualizada");
+                        show("Sucursal actualizada", "success");
                         mutateUsuarios();
                       } catch {
                         setError("Error al actualizar sucursal");
+                        show("Error al actualizar sucursal", "error");
                       } finally {
                         setLoading(false);
                       }
@@ -452,13 +582,47 @@ function UsuariosPage() {
                     ))}
                   </select>
                 </td>
-                <td className="p-2 border flex gap-2 justify-center">
+                <td className="flex gap-2 justify-center">
                   <button
                     className="text-blue-600 hover:underline"
                     onClick={() => handleEdit(usuario)}
                   >
                     Editar
                   </button>
+                  <div className="relative group">
+                    <button className="text-teal-700 hover:underline">
+                      Aplicar plantilla
+                    </button>
+                    <div className="absolute z-10 hidden group-hover:block bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded shadow p-2 text-xs">
+                      {Object.keys(templates).map((t) => (
+                        <button
+                          key={t}
+                          className="block text-left w-full hover:underline"
+                          onClick={async () => {
+                            setLoading(true);
+                            try {
+                              const res = await authFetch(
+                                `/api/usuarios/${usuario.id}`,
+                                {
+                                  method: "PUT",
+                                  body: { permisos: templates[t] },
+                                }
+                              );
+                              if (!res.ok) throw new Error();
+                              show(`Plantilla ${t} aplicada`, "success");
+                              mutateUsuarios();
+                            } catch {
+                              show("Error al aplicar plantilla", "error");
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <button
                     className="text-orange-600 hover:underline"
                     onClick={async () => {
@@ -481,15 +645,19 @@ function UsuariosPage() {
                       setError("");
                       setSuccess("");
                       try {
-                        const res = await fetch(`/api/usuarios/${usuario.id}`, {
-                          method: "PUT",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ password: nueva }),
-                        });
+                        const res = await authFetch(
+                          `/api/usuarios/${usuario.id}`,
+                          {
+                            method: "PUT",
+                            body: { password: nueva },
+                          }
+                        );
                         if (!res.ok) throw new Error();
                         setSuccess("Contraseña reseteada");
+                        show("Contraseña reseteada", "success");
                       } catch {
                         setError("Error al resetear contraseña");
+                        show("Error al resetear contraseña", "error");
                       } finally {
                         setLoading(false);
                       }
@@ -519,4 +687,6 @@ function UsuariosPage() {
     </div>
   );
 }
-export default withRole(UsuariosPage, ["admin"]);
+export default withPermission(withRole(UsuariosPage, ["admin"]), [
+  "usuarios.gestion",
+]);

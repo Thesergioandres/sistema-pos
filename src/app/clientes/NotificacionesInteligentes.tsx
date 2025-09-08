@@ -1,6 +1,7 @@
 "use client";
 import { useMemo } from "react";
 import useSWR from "swr";
+import { useAuthFetch } from "@/lib/useAuthFetch";
 
 interface Cliente {
   id: number;
@@ -10,9 +11,10 @@ interface Cliente {
 }
 
 export default function NotificacionesInteligentes() {
+  const { swrFetcher } = useAuthFetch();
   const { data: clientes = [] } = useSWR<Cliente[]>(
     "/api/clientes",
-    (url: string) => fetch(url).then((r) => r.json())
+    (url: string) => swrFetcher(url)
   );
   const hoy = useMemo(() => new Date(), []);
   // Cumpleaños hoy

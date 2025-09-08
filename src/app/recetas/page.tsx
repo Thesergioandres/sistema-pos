@@ -1,8 +1,9 @@
 "use client";
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 import React, { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { exportarVentasExcel } from "../reportes/ExportarExcel";
-import { exportarVentasPDF } from "../reportes/ExportarPDF";
+import { useAuthFetch } from "@/lib/useAuthFetch";
 
 interface Receta {
   id: number;
@@ -26,9 +27,8 @@ interface RecetaFormRow {
 
 function RecetasPage() {
   const { data: session } = useSession();
+  const { authFetch } = useAuthFetch();
   const [recetas, setRecetas] = useState<Receta[]>([]);
-  const [desde, setDesde] = useState("");
-  const [hasta, setHasta] = useState("");
   const [productoId, setProductoId] = useState<string>("");
   const [rows, setRows] = useState<RecetaFormRow[]>([
     { insumoId: "", cantidad: "" },
@@ -50,12 +50,10 @@ function RecetasPage() {
       const params = new URLSearchParams();
       const sucursalId = session?.user?.sucursalId;
       if (sucursalId) params.set("sucursalId", String(sucursalId));
-      if (desde) params.set("desde", desde);
-      if (hasta) params.set("hasta", hasta);
       if (Array.from(params).length > 0) {
         url += `?${params.toString()}`;
       }
-      const res = await fetch(url);
+      const res = await authFetch(url);
       const data = await res.json();
       setRecetas(data);
     } catch {
@@ -77,8 +75,8 @@ function RecetasPage() {
         insuUrl += `?sucursalId=${sucursalId}`;
       }
       const [prodRes, insuRes] = await Promise.all([
-        fetch(prodUrl),
-        fetch(insuUrl),
+        authFetch(prodUrl),
+        authFetch(insuUrl),
       ]);
       setProductos(await prodRes.json());
       setInsumos(await insuRes.json());
@@ -94,11 +92,6 @@ function RecetasPage() {
     fetchSelects();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.sucursalId]);
-  useEffect(() => {
-    fetchRecetas();
-    fetchSelects();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user?.sucursalId, desde, hasta]);
 
   // Manejar cambios en el formulario
   const handleRowChange = (
@@ -128,14 +121,13 @@ function RecetasPage() {
     try {
       // Enviar una receta por cada fila
       for (const row of rows) {
-        await fetch("/api/recetas", {
+        await authFetch("/api/recetas", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          body: {
             productoId: Number(productoId),
             insumoId: Number(row.insumoId),
             cantidad: Number(row.cantidad),
-          }),
+          },
         });
       }
       setSuccess("Recetas guardadas");
@@ -150,67 +142,13 @@ function RecetasPage() {
   };
 
   return (
-    <div className="p-8 max-w-2xl mx-auto">
+    <div className="max-w-5xl mx-auto px-4 py-6">
       <h1 className="text-2xl font-bold mb-4">Recetas</h1>
-      <div className="flex gap-2 mb-4">
-        <input
-          type="date"
-          value={desde}
-          onChange={(e) => setDesde(e.target.value)}
-          className="border p-2 rounded"
-          aria-label="Filtrar desde fecha"
-        />
-        <input
-          type="date"
-          value={hasta}
-          onChange={(e) => setHasta(e.target.value)}
-          className="border p-2 rounded"
-          aria-label="Filtrar hasta fecha"
-        />
-        <button
-          className="bg-green-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={() => {
-            const rows = recetas.map((r) => ({
-              id: r.id,
-              producto: String(r.productoId),
-              cantidad: r.cantidad,
-              total: 0,
-            }));
-            exportarVentasExcel(rows, "recetas.xlsx");
-          }}
-          disabled={recetas.length === 0 || loading}
-          aria-busy={loading}
-        >
-          {loading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar Excel
-        </button>
-        <button
-          className="bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 disabled:opacity-60"
-          onClick={() => {
-            const rows = recetas.map((r) => ({
-              id: r.id,
-              fecha: "",
-              usuarioNombre: String(r.productoId),
-              total: r.cantidad,
-            }));
-            exportarVentasPDF(rows, "recetas.pdf");
-          }}
-          disabled={recetas.length === 0 || loading}
-          aria-busy={loading}
-        >
-          {loading && (
-            <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-          )}
-          Exportar PDF
-        </button>
-      </div>
       {error && <div className="text-red-600 mb-2">{error}</div>}
       {success && <div className="text-green-600 mb-2">{success}</div>}
       <form
         onSubmit={handleSubmit}
-        className="mb-6 bg-white dark:bg-zinc-900 p-4 rounded shadow flex flex-col gap-2"
+        className="mb-6 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-sm flex flex-col gap-2"
         aria-label="Formulario de receta"
       >
         <label className="text-sm">Producto</label>
@@ -219,7 +157,7 @@ function RecetasPage() {
           value={productoId}
           onChange={(e) => setProductoId(e.target.value)}
           required
-          className="border p-2 rounded"
+          className="border p-2 rounded bg-transparent"
           disabled={loadingSelects}
         >
           <option value="">
@@ -235,13 +173,16 @@ function RecetasPage() {
         </select>
         <label className="text-sm mt-2">Insumos y cantidades</label>
         {rows.map((row, idx) => (
-          <div key={idx} className="flex gap-2 items-center mb-1">
+          <div
+            key={idx}
+            className="flex flex-col sm:flex-row gap-2 items-center mb-1"
+          >
             <select
               name="insumoId"
               value={row.insumoId}
               onChange={(e) => handleRowChange(idx, e)}
               required
-              className="border p-2 rounded"
+              className="border p-2 rounded bg-transparent"
               disabled={loadingSelects}
             >
               <option value="">
@@ -262,7 +203,7 @@ function RecetasPage() {
               value={row.cantidad}
               onChange={(e) => handleRowChange(idx, e)}
               required
-              className="border p-2 rounded w-24"
+              className="border p-2 rounded w-24 bg-transparent"
             />
             <button
               type="button"
@@ -292,10 +233,8 @@ function RecetasPage() {
           Guardar receta(s)
         </button>
       </form>
-      {error && <div className="text-red-600 mb-2">{error}</div>}
-      {success && <div className="text-green-600 mb-2">{success}</div>}
-      <div className="overflow-x-auto">
-        <table className="min-w-full border">
+      <div className="table-wrapper">
+        <table className="table-base">
           <thead>
             <tr className="bg-gray-100 dark:bg-zinc-800">
               <th className="p-2 border">ID</th>
@@ -309,13 +248,16 @@ function RecetasPage() {
           </thead>
           <tbody>
             {recetas.map((receta) => (
-              <tr key={receta.id}>
+              <tr
+                key={receta.id}
+                className="hover:bg-blue-50 transition-colors"
+              >
                 <td className="p-2 border text-center">{receta.id}</td>
-                <td className="p-2 border">
+                <td className="p-2 border break-anywhere">
                   {productos.find((p) => p.id === receta.productoId)?.nombre ||
                     receta.productoId}
                 </td>
-                <td className="p-2 border">
+                <td className="p-2 border break-anywhere">
                   {insumos.find((i) => i.id === receta.insumoId)?.nombre ||
                     receta.insumoId}
                 </td>
@@ -330,9 +272,12 @@ function RecetasPage() {
                         setError("");
                         setSuccess("");
                         try {
-                          const res = await fetch(`/api/recetas/${receta.id}`, {
-                            method: "DELETE",
-                          });
+                          const res = await authFetch(
+                            `/api/recetas/${receta.id}`,
+                            {
+                              method: "DELETE",
+                            }
+                          );
                           if (!res.ok) throw new Error();
                           setSuccess("Receta eliminada");
                           fetchRecetas();
@@ -364,4 +309,7 @@ function RecetasPage() {
 }
 
 import { withRole } from "../components/withRole";
-export default withRole(RecetasPage, ["admin", "supervisor"]);
+import { withPermission } from "../components/withPermission";
+export default withPermission(withRole(RecetasPage, ["admin", "supervisor"]), [
+  "catalogo.recetas",
+]);

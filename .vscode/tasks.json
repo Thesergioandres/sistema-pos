@@ -5,6 +5,16 @@
 			"label": "Instalar dependencias faltantes para Next.js, Prisma, Auth, reportes, gráficos, PWA y Turbo",
 			"type": "shell",
 			"command": "npm install next react react-dom tailwindcss autoprefixer postcss eslint eslint-config-next @types/react @types/react-dom @types/node @prisma/client prisma next-auth next-pwa jspdf jspdf-autotable xlsx chart.js react-chartjs-2 recharts bcryptjs @types/bcryptjs @types/jspdf @types/xlsx turbo --save-dev"
+		},
+		{
+			"label": "Build Next.js app",
+			"type": "shell",
+			"command": "npm run build",
+			"problemMatcher": [
+				"$tsc",
+				"$eslint - stylish"
+			],
+			"group": "build"
 		}
 	]
 }
