@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import authOptions from "@/pages/api/auth/[...nextauth]";
 import type { Session } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermissionWithFirstUserBypass } from "@/lib/permissions";
 import { logDebug, logInfo, logWarn } from "@/lib/serverLog";
 
 export async function POST(request: Request) {
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   // Validaciones de autorización:
   // - Admin o usuarios.gestion: permitido
   // - Propietario del negocio de esa sucursal: permitido
-  if (!hasPermission(session, "usuarios.gestion")) {
+  if (!(await hasPermissionWithFirstUserBypass(session, "usuarios.gestion"))) {
     logDebug(
       "[POST /api/usuarios/cambiar-sucursal] sin permiso usuarios.gestion, validando propiedad del negocio",
       { userId, sucursalId }
