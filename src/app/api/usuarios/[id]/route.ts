@@ -4,14 +4,14 @@ import { hash } from "bcryptjs";
 import { getServerSession } from "next-auth";
 import authOptions from "@/pages/api/auth/[...nextauth]";
 import type { Session } from "next-auth";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermissionWithFirstUserBypass } from "@/lib/permissions";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = (await getServerSession(authOptions)) as Session | null;
-  if (!hasPermission(session, "usuarios.gestion")) {
+  if (!(await hasPermissionWithFirstUserBypass(session, "usuarios.gestion"))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
   const { id } = await params;
@@ -28,7 +28,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = (await getServerSession(authOptions)) as Session | null;
-  if (!hasPermission(session, "usuarios.gestion")) {
+  if (!(await hasPermissionWithFirstUserBypass(session, "usuarios.gestion"))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
   const { id } = await params;
@@ -56,7 +56,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = (await getServerSession(authOptions)) as Session | null;
-  if (!hasPermission(session, "usuarios.gestion")) {
+  if (!(await hasPermissionWithFirstUserBypass(session, "usuarios.gestion"))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
   const { id } = await params;

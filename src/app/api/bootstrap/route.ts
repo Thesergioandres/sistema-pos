@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import type { Session } from "next-auth";
@@ -77,7 +78,7 @@ export async function GET() {
     catPromises.push(
       (async () => {
         const r = await prisma.producto.findMany({ orderBy: { id: "asc" } });
-        data.productos = r.map((p) => ({
+        data.productos = r.map((p: any) => ({
           id: p.id,
           nombre: p.nombre,
           tamanio: p.tamanio,
@@ -90,7 +91,7 @@ export async function GET() {
     catPromises.push(
       (async () => {
         const r = await prisma.insumo.findMany({ orderBy: { id: "asc" } });
-        data.insumos = r.map((i) => ({
+        data.insumos = r.map((i: any) => ({
           id: i.id,
           nombre: i.nombre,
           stock: i.stock,
@@ -105,7 +106,7 @@ export async function GET() {
     catPromises.push(
       (async () => {
         const r = await prisma.receta.findMany({ orderBy: { id: "asc" } });
-        data.recetas = r.map((x) => ({
+        data.recetas = r.map((x: any) => ({
           id: x.id,
           productoId: x.productoId,
           insumoId: x.insumoId,
@@ -118,7 +119,7 @@ export async function GET() {
     catPromises.push(
       (async () => {
         const r = await prisma.combo.findMany({ orderBy: { id: "asc" } });
-        data.combos = r.map((c) => ({
+        data.combos = r.map((c: any) => ({
           id: c.id,
           nombre: c.nombre,
           descripcion: c.descripcion,
@@ -133,7 +134,7 @@ export async function GET() {
   const cliPromise = hasPermission(session, "clientes.gestion")
     ? prisma.cliente
         .findMany({ orderBy: { id: "asc" } })
-        .then((r) => (data.clientes = r))
+        .then((r: any) => (data.clientes = r))
     : Promise.resolve();
 
   // Ventas
@@ -145,7 +146,7 @@ export async function GET() {
           orderBy: { fecha: "desc" },
           take: 100,
         });
-        data.ventas = r.map((v) => ({
+        data.ventas = r.map((v: any) => ({
           id: v.id,
           fecha: v.fecha,
           usuarioId: v.usuarioId,
@@ -168,10 +169,10 @@ export async function GET() {
           orderBy: { fecha: "desc" },
           take: 200,
         })
-        .then((ventas) => {
+        .then((ventas: any) => {
           const pendientes = ventas
-            .map((v) => {
-              const pagado = v.pagos.reduce((acc, p) => acc + p.monto, 0);
+            .map((v: any) => {
+              const pagado = v.pagos.reduce((acc: any, p: any) => acc + p.monto, 0);
               const saldo = Math.max(0, v.total - pagado);
               return {
                 id: v.id,
@@ -181,7 +182,7 @@ export async function GET() {
                 saldo,
               };
             })
-            .filter((x) => x.saldo > 0.001);
+            .filter((x: any) => x.saldo > 0.001);
           data.ventasPendientes = pendientes;
         })
     );
@@ -196,7 +197,7 @@ export async function GET() {
     adminPromises.push(
       (async () => {
         const r = await prisma.sucursal.findMany({ orderBy: { id: "asc" } });
-        data.sucursales = r.map((s) => ({
+        data.sucursales = r.map((s: any) => ({
           id: s.id,
           nombre: s.nombre,
           direccion: s.direccion ?? null,
@@ -208,7 +209,7 @@ export async function GET() {
     adminPromises.push(
       (async () => {
         const r = await prisma.usuario.findMany({ orderBy: { id: "asc" } });
-        data.usuarios = r.map((u) => ({
+        data.usuarios = r.map((u: any) => ({
           id: u.id,
           email: u.email,
           nombre: u.nombre,

@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import authOptions from "@/pages/api/auth/[...nextauth]";
 import type { Session } from "next-auth";
+import { prisma } from "@/lib/prisma";
 
 export async function getSessionWithPerms(): Promise<Session | null> {
   const session = (await getServerSession(authOptions)) as Session | null;
@@ -26,4 +27,24 @@ export function hasAnyPermission(
   keys: string[]
 ): boolean {
   return keys.some((k) => hasPermission(session, k));
+}
+
+// Helper para verificar permisos con bypass para primer usuario admin
+export async function hasPermissionWithFirstUserBypass(
+  session: Session | null, 
+  key: string
+): Promise<boolean> {
+  if (!session?.user) return false;
+  
+  // Verificar permiso normal primero (incluye admin bypass existente)
+  if (hasPermission(session, key)) {
+    return true;
+  }
+  
+  // Bypass adicional para el primer usuario admin durante setup inicial
+  const totalUsuarios = await prisma.usuario.count();
+  const isFirstUser = totalUsuarios === 1;
+  const userRole = (session.user as unknown as { rol?: string }).rol;
+  
+  return isFirstUser && userRole === "admin";
 }

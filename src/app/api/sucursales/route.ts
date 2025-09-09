@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { getServerSession } from "next-auth";
 import authOptions from "@/pages/api/auth/[...nextauth]";
 import type { Session } from "next-auth";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermission, hasPermissionWithFirstUserBypass } from "@/lib/permissions";
 import { logDebug, logInfo, logWarn, logError } from "@/lib/serverLog";
 
 // GET: Listar sucursales (opcionalmente por negocioId)
@@ -121,6 +121,7 @@ export async function POST(request: Request) {
     logWarn("[POST /api/sucursales] 401 sin sesión");
     return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   }
+
   const data = await request.json();
   logDebug("[POST /api/sucursales] payload recibido", data);
   const { nombre, direccion } = data ?? {};
@@ -141,8 +142,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Nombre requerido" }, { status: 400 });
   }
 
+  // Verificar permisos con bypass para primer usuario admin
+  const hasPerms = await hasPermissionWithFirstUserBypass(session, "sucursales.gestion");
+  
   // Si no tiene permiso explícito, permitir si es propietario del negocio destino
-  if (!hasPermission(session, "sucursales.gestion")) {
+  if (!hasPerms) {
     logDebug(
       "[POST /api/sucursales] sin permiso sucursales.gestion, intentando autorizar por propiedad",
       { userId: session.user.id, negocioId }
@@ -331,7 +335,8 @@ export async function POST(request: Request) {
 // PUT: Editar una sucursal
 export async function PUT(request: Request) {
   const session = (await getServerSession(authOptions)) as Session | null;
-  if (!hasPermission(session, "sucursales.gestion")) {
+  
+  if (!(await hasPermissionWithFirstUserBypass(session, "sucursales.gestion"))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
   const data = await request.json();
@@ -351,7 +356,8 @@ export async function PUT(request: Request) {
 // DELETE: Eliminar una sucursal
 export async function DELETE(request: Request) {
   const session = (await getServerSession(authOptions)) as Session | null;
-  if (!hasPermission(session, "sucursales.gestion")) {
+  
+  if (!(await hasPermissionWithFirstUserBypass(session, "sucursales.gestion"))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
   const data = await request.json();

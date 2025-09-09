@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import authOptions from "@/pages/api/auth/[...nextauth]";
 import type { Session } from "next-auth";
-import { hasPermission } from "@/lib/permissions";
+import { hasPermissionWithFirstUserBypass } from "@/lib/permissions";
 
 // GET /api/sucursales/[id]
 export async function GET(
@@ -11,7 +11,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = (await getServerSession(authOptions)) as Session | null;
-  if (!hasPermission(session, "sucursales.gestion")) {
+  if (!(await hasPermissionWithFirstUserBypass(session, "sucursales.gestion"))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
   const { id: idStr } = await params;
@@ -39,7 +39,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = (await getServerSession(authOptions)) as Session | null;
-  if (!hasPermission(session, "sucursales.gestion")) {
+  if (!(await hasPermissionWithFirstUserBypass(session, "sucursales.gestion"))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
   const { id: idStr } = await params;
@@ -56,7 +56,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = (await getServerSession(authOptions)) as Session | null;
-  if (!hasPermission(session, "sucursales.gestion")) {
+  if (!(await hasPermissionWithFirstUserBypass(session, "sucursales.gestion"))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
   const { id: idStr } = await params;
